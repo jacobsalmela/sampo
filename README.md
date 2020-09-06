@@ -1,66 +1,44 @@
-bashttpd is a simple, configurable web server written in bash
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/3843505/92512260-26878d80-f1d4-11ea-944d-73f3387f74e2.png" width="150" height="150" alt="sampo">
+  <br>
+  <strong>A RESTful API server written in bash that runs on Kubernetes</strong>
+</p>
 
-Requirements
--------------
+```
+joukahainen:~$ curl -i http://localhost:1042/echo/rusty-fork
+HTTP/1.1 200 OK
+Date: Sun, 06 Sep 2020 16:54:45 UTC
+Version: HTTP/1.1
+Accept: text/plain
+Accept-Language: en-US
+Server: sampo/1.0.0
+Content-Type: text/plain
 
-  1. `bash`, any recent version should work
-  2. `socat` or `netcat` to handle the underlying sockets. 
-  3. A healthy dose of insanity
+rusty-fork
+```
 
-Examples
----------
+# How It Works
 
-      socat TCP4-LISTEN:8080 EXEC:/usr/local/bin/bashttpd
+The `sampo` Kubernetes Deployment runs a `sampo` container, which is running a shell script that processes your API calls.  Each endpoint can call any arbitrary shell code.
 
-Or
+You can run `sampo` directly in your shell, but it works best in Kubernetes.
 
-      netcat -lp 8080 -e ./bashttpd
+# Details
 
-Note that in the `socat` example above, the web server will immediately exit once the first connection closes. If you wish to serve to more than one client - like most servers do, then use the variant:
+Details can be found on [this blog post]().
 
-     socat TCP4-LISTEN:8080,fork EXEC:/usr/local/bin/bashttpd
+# Developing/testing
 
-This way, a new process is spawned for each incoming connection.
+If you want to test this out yourself, you can.  I run it on Kubernetes in Docker for Mac, but the instructions should basically be the same:
+```
+git clone https://github.com/jacobsalmela/sampo.git
+cd sampo/
+kubectl create -f sampo/
+```
 
-
-Getting started
-----------------
-
-  1. Running bashttpd for the first time will generate a default configuration file, bashttpd.conf
-  2. Review bashttpd.conf and configure it as you want.
-  3. Run bashttpd using netcat or socat, as listed above.
-
-Features
----------
-
-  1. Serves text and HTML files
-  2. Shows directory listings
-  3. Allows for configuration based on the client-specified URI
-
-Limitations
-------------
-
-  1. Does not support authentication
-  2. Doesn't strictly adhere to the HTTP spec.
-
-Security
---------
-
-  1. Only rudimentary input handling.  We would not running this on a public machine.
-
-HTTP protocol support
----------------------
-
-  403: Returned when a directory is not listable, or a file is not readable
-  400: Returned when the first word of the first line is not `GET`
-  200: Returned with valid content
-  Content-type: Bashttpd uses /usr/bin/file to determine the MIME type to sent to the browser
-  1.0: The server doesn't support Host: headers or other HTTP/1.1 features - it barely supports HTTP/1.0!
-
-As always, your patches/pull requests are welcome!
-
-Testimonials
-------------
-
-"If anyone installs that anywhere, they might meet a gruesome end with a rusty fork"
-    --- BasHTTPd creator, maintainer
+## Testing changes
+I use a simple build script to delete my current deployment, re-deploy it, and set up port forwarding (this all assumes local development on Docker for Mac).  Then I just run:
+```
+./build.sh
+```
+I currently use [`bats-core`](https://github.com/bats-core/bats-core) in the script.  It doesn't work all that well, but it's a nice indicator if something is immediately wrong.

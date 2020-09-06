@@ -1,0 +1,77 @@
+apiVersion: v1
+data:
+  sampo.conf: |
+    # Original author: Avleen Vig, 2012
+    # Copyright (C) Jacob Salmela, 2020 <me@jacobsalmela.com> (sampo)
+    #
+    # You can configure sampo by modifying sampo.conf (or endpoints.yml in k8s)
+    #
+    # This config file is mainly for defining endpoints a client will use
+    # You can add any arbitrary shell code here, but it's usually easier
+    # to define only your endpoints the functions they should call here
+    # Those functions and any custom ones should be added to sampo.sh
+    #
+    # Rules usage line:
+    #    match_uri REGEX command [args]
+    #
+    # match_uri:
+    #   On an incoming request, the URI is checked against the regex.
+    #   If one is found, the specified command is executed with the specified arguments.
+    #
+    #   This function will also pass the results of the regex match,
+    #   ${BASH_REMATCH[@]} as additional arguments to the command.
+    #
+    # The following default functions are predefined in sampo.sh:
+    #
+    #   list_endpoints
+    #     DEFAULT: '/'
+    #         greps out any match_uri's from this config and creates a simple array with
+    #         the function that endpoint is configured to serve.
+    #
+    #   run_external_script SCRIPT
+    #     DEFAULT: '/example'
+    #         Likely the most useful of the pre-made functions; this lets you call
+    #         any arbitrary script that you want and will send it's output back
+    #         as a response.
+    #
+    #   serve_echo STRING
+    #     DEFAULT: '/echo'
+    #         Simply echos back what you send it.
+    #
+    #   serve_file FILE
+    #     DEFAULT: '/issue'
+    #         Statically serves a single file.
+    #
+    #   serve_dir_with_ls DIRECTORY
+    #     DEFAULT: '/root'
+    #         Statically serves the specified directory using 'ls -al'.
+    #
+    # If you don't pass anything, this will list all of the endpints you have defined.
+    # This is useful for debugging when making your own endpoints and functions,
+    # but it just shows how you can make a function in shell code in sampo.sh
+    # and use the match_uri to run some arbitrary shell code
+    match_uri '^/$' list_endpoints
+
+    # Probably the most useful to end-users is the ability to call your own scripts
+    # Here, we match an '/example' endpoint and then run a script residing on the server
+    # In a K8S setup, this works best by adding a config map with the script
+    match_uri '^/example$' run_external_script /scripts/external.sh
+
+    # You can also write shell code directly in this config by creating functions
+    # and then creating a match_uri to go with it
+    serve_echo() {
+       append_header "Content-Type" "text/plain"
+       send_response 200 <<< "$2"
+    }
+    match_uri '^/echo/(.*)$' serve_echo
+
+    # If the endpoint called is /issue, return the content of /etc/issue
+    match_uri '^/issue$' serve_file "/etc/issue"
+
+    # If the endpoint called is /root, return a directory listing of / using ls
+    match_uri '^/root$' serve_dir_with_ls /
+
+    # Create your own endpoints below
+kind: ConfigMap
+metadata:
+  name: sampo-conf

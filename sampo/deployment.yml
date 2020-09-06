@@ -1,0 +1,37 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sampo
+  labels:
+    app: sampo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sampo
+  template:
+    metadata:
+      labels:
+        app: sampo
+    spec:
+      securityContext:
+        runAsUser: 0
+      volumes:
+      - name: sampo-conf
+        configMap:
+          name: sampo-conf
+      - name: external-example
+        configMap:
+          name: external-example
+      containers:
+      - name: sampo
+        image: sampo:1.0
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 1042
+        volumeMounts:
+        - name: sampo-conf
+          mountPath: /conf
+        - name: external-example
+          mountPath: /scripts

@@ -1,0 +1,2 @@
+github: [jacobsalmela]
+custom: ['https://jacobsalmela.com/sponsor/']

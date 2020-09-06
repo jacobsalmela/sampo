@@ -1,0 +1,14 @@
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: sampo
+spec:
+  selector:
+    app: sampo
+  ports:
+  - name: sampo-endpoint
+    protocol: TCP
+    port: 1042
+    targetPort: 1042
+  type: NodePort

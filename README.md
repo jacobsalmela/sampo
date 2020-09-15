@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://user-images.githubusercontent.com/3843505/92512260-26878d80-f1d4-11ea-944d-73f3387f74e2.png" width="150" height="150" alt="sampo">
   <br>
-  <strong>A RESTful API server written in bash that runs on Kubernetes</strong>
+  <strong>A shell script API server for running your shell scripts.</strong>
 </p>
 
 ```
@@ -25,7 +25,7 @@ You can run `sampo` directly in your shell, but it works best in Kubernetes.
 
 # Details
 
-Details can be found on [this blog post]().
+Details can be found on [this blog post](https://jacobsalmela.com/2020/09/15/introducing-sampo-a-bash-api-server-that-runs-your-shell-scripts/).
 
 # Developing/testing
 

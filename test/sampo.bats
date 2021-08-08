@@ -2,7 +2,7 @@
 PORT=1042
 
 test_curl(){
-  /usr/bin/curl -s "$1" | sed "s/$(printf '\r')\$//"
+  /usr/bin/curl -s "$1" | sed "s/$(printf '\r')\$//" > /dev/null 2>&1
 }
 
 @test "echo endpoint" {

@@ -33,14 +33,14 @@ readonly LOG_FILE="$WDIR/$(basename "${0%.*}").log"
 # If the file does not exist,
 if [[ ! -f "$CONTAINER_CHECK" ]] || [[ "$(cat $CONTAINER_CHECK)" == '/' ]]; then
   # We might be on macOS or some other Darwin-like system that doesn't use /proc
-  readonly CONFIG="$WDIR/$APP.conf"
+  readonly CONFIG="$WDIR/$APP/$APP.conf"
 
   # Log to stdout and to a log file if we're not in a container
   log() { echo -e "$*" | tee -a "$LOG_FILE" >&2 ; }
 
 else
-  # Otherwise, we're probably in a container, so source it from where the kube deployment places it
-  readonly CONFIG="/conf/$APP.conf"
+  # Otherwise, we're probably in a container, so source from sampo/sampo.conf
+  readonly CONFIG="/$APP/$APP.conf"
 
   # We can just log to STDOUT in a container
   log() { echo -e "$*"; }

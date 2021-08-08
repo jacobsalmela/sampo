@@ -32,6 +32,6 @@ spec:
         - containerPort: 1042
         volumeMounts:
         - name: sampo-conf
-          mountPath: /conf
+          mountPath: /sampo
         - name: external-example
-          mountPath: /scripts
+          mountPath: /sampo/scripts

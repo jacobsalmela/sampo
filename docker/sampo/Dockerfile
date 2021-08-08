@@ -1,9 +1,17 @@
 # Copyright (C) Jacob Salmela, 2020 <me@jacobsalmela.com>
 # This file is part of sampo
 FROM bash:4.4
-MAINTAINER Jacob Salmela <me@jacobsalmela.com>
+LABEL Jacob Salmela <me@jacobsalmela.com>
 
-RUN apk add --no-cache file netcat-openbsd socat
+# file                  for returning Content-Type and Content-Lenght headers
+# netcat-openbsd        for in-container debugging and/or an simpler alternative to socat
+# openssh-client        for remote connections using the host's .ssh/ folder when volume mounted
+# socat                 the main command used to serve the API
+RUN apk add --no-cache \
+    file \
+    netcat-openbsd \
+    openssh-client \
+    socat
 
 EXPOSE 1042
 
@@ -18,5 +26,9 @@ RUN chmod 755 /sampo.sh
 # You can also run sampo directly in bash using a loop:
 #    while true; do { echo -e 'HTTP/1.1 200 OK\r\n'; bash ./sampo.sh; } | nc -l 1042; done
 #
-#         protocol  :port,
-CMD socat TCP-LISTEN:1042,reuseaddr,pf=ip4,bind=127.0.0.1,fork system:/sampo.sh
+
+#         TCP-LISTEN:PORT:    socat will listen locally on the specified port
+#         reuseaddr,fork      When accepting a connection, socat will fork to handle it. This means that it can handle parallel connections, and won't die after the first connection
+#
+CMD socat -d -d TCP-LISTEN:1042,reuseaddr,fork,pf=ip4 \
+          exec:/sampo.sh

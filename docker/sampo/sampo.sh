@@ -17,10 +17,12 @@
 # This variable is useful if we ever want to use the name of the app anywhere in the code
 readonly APP=sampo
 
+# Set the version here and it will be applied during build time and set wherever the version string is needed
 readonly VERSION=1.0.0
 
 # Get the full directory name of the script no matter where it is being called from
-readonly WDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+WDIR=""
+WDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 # Set a config location depending where we are running from
 # Simple check to see if we're likely in a container
@@ -28,19 +30,22 @@ readonly CONTAINER_CHECK="/proc/1/cgroup"
 
 # Useful logging in the same dir as the script
 # set to readonly--Don't let the path be changed
-readonly LOG_FILE="$WDIR/$(basename "${0%.*}").log"
+LOG_FILE=""
+LOG_FILE="$WDIR/$(basename "${0%.*}").log"
 
 # If the file does not exist,
-if [[ ! -f "$CONTAINER_CHECK" ]] || [[ "$(cat $CONTAINER_CHECK)" == '/' ]]; then
+if [[ ! -f "$CONTAINER_CHECK" ]] \
+    || [[ "$(cat $CONTAINER_CHECK)" == '/' ]]; then
+
   # We might be on macOS or some other Darwin-like system that doesn't use /proc
-  readonly CONFIG="$WDIR/$APP.conf"
+  readonly CONFIG="$WDIR/examples/$APP.conf"
 
   # Log to stdout and to a log file if we're not in a container
-  log() { echo -e "$*" | tee -a "$LOG_FILE" >&2 ; }
+  log() { echo -e "$*" >> "$LOG_FILE"; }
 
 else
-  # Otherwise, we're probably in a container, so source it from where the kube deployment places it
-  readonly CONFIG="/conf/$APP.conf"
+  # Otherwise, we're probably in a container, so source from sampo/sampo.conf
+  readonly CONFIG="/$APP/$APP.conf"
 
   # We can just log to STDOUT in a container
   log() { echo -e "$*"; }
@@ -62,22 +67,23 @@ readonly ACCEPT_TYPE="text/plain"
 readonly ACCEPT_LANG="en-US"
 
 
-# A function to receive data from the client
+# receive() receives data from the client
 receive() {
-  log "REQUEST: " "$@" >&2;
+  log
+  log "=====> REQUEST: " "$@" >&2;
+  log
 }
 
 
-# A function to send data back to the client
-# This is the response from the API
+# respond() sends data back to the client.  This is the response from the API
 respond() {
-  log "RESPONSE: " "$@" >&2; printf '%s\r\n' "$*";
+  log "<==   RESPONSE: " "$@" >&2; printf '%s\r\n' "$*"
 }
 
 
-# A function to show warning messages
+# warn() shows warning messages
 warn() {
-  log "WARNING:" "$@" >&2;
+  log "WARNING:" "$@" >&2
 }
 
 
@@ -99,6 +105,7 @@ declare -a RESPONSE_HEADERS=(
 )
 
 
+# append_header() adds arbitrary response headers to the API's response
 append_header() {
   # Add an arbitrary response to the simple header defined in RESPONSE_HEADERS
   local field_definition="$1"
@@ -175,9 +182,8 @@ declare -a RESPONSE_CODE=(
   # [511]="Network Authentication Required"
 )
 
-
+# send_response() sends a response back to the client when they make an API call
 send_response() {
-  # This is the main function that sends a response back to the client when they make an API call
   # The first argument is the return code we need to send
   local code=$1
   # Send a response code and the text from the array above
@@ -192,58 +198,74 @@ send_response() {
   #     "Server: $APP/$VERSION"
   # as well as any arbitrary ones we add using append_header()
   for header in "${RESPONSE_HEADERS[@]}"; do
-    # send the line to the client
+    # send each header to the client
     respond "$header"
   done
   # send a blank line
   respond
 
-  #
+  # then send the response from the output
+  # -r, do not allow backslashes to escape any characters
   while read -r LINE; do
     respond "$LINE"
   done
 }
 
 
-fail_with() {
-  # If we need to fail, we can fail with a specific code
-  local code="$1"
-  send_response "$code" <<< "$code ${RESPONSE_CODE[$code]}"
-  exit 0
+# serve_echo() replies an echo of arbitrary text
+serve_echo() {
+  if [[ -z "$2" ]]; then
+    send_response 400 <<< "Expected an argument"
+  else
+    send_response 200 <<< "$2"
+  fi
 }
 
 
 serve_file() {
   local filename="$1"
 
-  # Get the content type of the file so we can return it to the client
+  # Get the content type of the file and save it to a variable so we can return it to the client in a header
   read -r CONTENT_TYPE < <(file -b --mime-type "$filename")
 
   # Append it to the array, RESPONSE_HEADERS
   append_header "Content-Type" "$CONTENT_TYPE";
 
   # Also get the length so that can be returned as well
-  read -r CONTENT_LENGTH < <(stat -c'%s' "$filename")
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    read -r CONTENT_LENGTH < <(stat -f'%z' "$filename")
+  else
+    read -r CONTENT_LENGTH < <(stat -c'%s' "$filename")
+  fi
 
-  # Append this as well to the array, RESPONSE_HEADERS
+  # Do the same for the file's size, RESPONSE_HEADERS
   append_header "Content-Length" "$CONTENT_LENGTH"
 
+  # Send the content of the file
   send_response 200 < "$filename"
 }
 
 
+# serve_dir_with_ls() does a long listing on a directory passed to it
 serve_dir_with_ls()
 {
-  local dir=$1
-
+  local dir
+  readonly dir=$1
   # The output from the 'ls' command is just text, so set that here
   append_header "Content-Type" "text/plain"
 
-  # Send back the listing with a 200 return code
+  # Send back the long listing with a 200 return code
   send_response 200 < <(ls -la "$dir")
 }
 
+# uri_decode() decodes URL-encoded strings for easier handling in shell
+uri_decode() {
+  # Taken from https://stackoverflow.com/a/6265305/566849
+  echo -e "$(sed 's/+/ /g;s/%\(..\)/\\x\1/g;')"
+}
 
+
+# match_uri() matches the endpoints being requested by the client using a regular expression
 match_uri() {
   local regex="$1"
   # shift to the next parameter
@@ -256,16 +278,16 @@ match_uri() {
   fi
 }
 
-
+# list_functions() returns a list of all the available functions (API endpoints) provided in this script
+# by default, this is sent when you don't request the root endpoint of the API (http://localhost:PORT/)
 list_functions() {
   # This lists the names of all the defined functions
-  # By default this is called when you don't pass anything to your api call
   # This is useful for debugging, but it illustrates how you can make your
   # own functions here with any shell code you want, and have it callable via an API request
   declare -F | awk '{print $3}'
 }
 
-
+# request_headers() checks the request for any headers and appends them to an array
 request_headers() {
   # Declare an array for the request headers.  We can use this in a
   # similiar fashion to the RESPONSE_HEADERS by looping over it for whatever we need
@@ -286,6 +308,7 @@ request_headers() {
 }
 
 
+# detect_endpoints() puts all the endpoints into an array
 detect_endpoints() {
   # Deine an array to hold all our endpoints
   ENDPOINTS_FUNCTIONS=()
@@ -311,7 +334,7 @@ detect_endpoints() {
   done  < <(awk '/^match_uri/ {print $2, $3}' "$CONFIG" | tr -dc '[:alnum:][:space:]/_\n\r' | sort)
 }
 
-
+# list_endpoints() lists all available endpoints
 list_endpoints() {
   # Lists all configured endpoints and the functions they call from sampo.conf
   # By default, this is tied to the / endpoint
@@ -321,41 +344,39 @@ list_endpoints() {
 }
 
 
+# does_endpoint_exist() validates that an endpoint exists, and sends back a 405 (method not allowed)
 does_endpoint_exist() {
   # Check if the endpoint the user requested actually exists
   detect_endpoints
 
-  # for endpoint in "${ENDPOINTS_FUNCTIONS[@]}"
-  # do
-  #   # key (endpoint)
-  #   endpoint="${endpoint%%:*}"
-  #
-  #   # Create an array of just
-  #   ENDPOINTS+=("$endpoint")
-  # done
-  #
-  # if [[ "${REQUEST_URI}" =~ ${ENDPOINTS[*]} ]]; then
-  #   echo endpoint found
-  # else
-  #   fail_with 405
+  # if [[ ${ENDPOINTS_FUNCTIONS[*]} =~ ${REQUEST_URI} ]]; then
+  #   # whatever you want to do when array contains value
+  #   return 0
   # fi
+
+  # if [[ ! "${ENDPOINTS_FUNCTIONS[*]}" =~ ${REQUEST_URI} ]]; then
+  #     # whatever you want to do when array doesn't contain value
+  #     send_response 404 <<< "${REQUEST_URI} does not exist"
+  #     return 1
+  # fi
+
 }
 
-
+# run_external_script() executes an arbitrary shell script
+# this is perhaps the most useful portion of this API as it allows you to extend it's capabilities with any existing shell scripts you have
 run_external_script() {
-  # Runs an arbitrary shell script located somewhere else
-  # This will be the best way to extend this MVP by adding your own scripts
-  script_to_run="$1"
-  send_response 200 < <(bash $script_to_run)
+  local script_to_run="$1"
+  # use process substitution to send the output of the shell script as an api response: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#Process-Substitution
+  send_response 200 < <("$script_to_run" 2>&1)
 }
 
-
+# listen_for_requests()
 listen_for_requests() {
   # This is the main function that provides listens for requests from the client
   # It fomats the request appropriately and saves it into vars for use in other functions
 
   # Read in the request from the client
-  read -r LINE || fail_with 400
+  read -r LINE #|| send_response 400
 
   # strip trailing CR
   LINE=${LINE%%$'\r'}
@@ -364,9 +385,14 @@ listen_for_requests() {
   #       GET            /echo/hi    HTTP/1.1
   read -r REQUEST_METHOD REQUEST_URI REQUEST_HTTP_VERSION <<<"$LINE"
 
-  # If any of the below are zero values, fail_with 400 as it may not be a proper request
-  if [[ -z "$REQUEST_METHOD" ]] || [[ -z "$REQUEST_URI" ]] || [[ -z "$REQUEST_HTTP_VERSION" ]]; then
-    fail_with 400
+  # Borrowed from https://github.com/avleen/bashttpd/pull/37/files
+  # REQUEST_URI=$(uri_decode <<<"$REQUEST_URI")
+
+  # If any of the below are zero values, fail with 400 as it may not be a proper request
+  if [[ -z "$REQUEST_METHOD" ]] \
+     || [[ -z "$REQUEST_URI" ]] \
+     || [[ -z "$REQUEST_HTTP_VERSION" ]]; then
+        send_response 400 <<< "\$REQUEST_METHOD:$REQUEST_METHOD \$REQUEST_URI:$REQUEST_URI \$REQUEST_HTTP_VERSION:$REQUEST_HTTP_VERSION"
   fi
 
   # if [[ "$REQUEST_METHOD" == "GET" ]]; then
@@ -381,14 +407,16 @@ listen_for_requests() {
   #   :
   # fi
 
-  does_endpoint_exist
-
-  receive "$LINE"
+  # check first if the endpoint exists
+  if eval does_endpoint_exist; then
+    receive "$LINE"
+  fi
 }
 
 
+# Start the API server
 listen_for_requests
 
 # shellcheck source=/dev/null
-# import the config file
+# then import the config file
 source "$CONFIG"

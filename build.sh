@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Vars
-APP=sampo
-VERSION=1.0
-PORT=1042
+source ./vars.bash
+
 # Get the full directory name of the script no matter where it is being called from
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
@@ -69,7 +67,7 @@ else
   # Run it in a docker container by default, mounting the examples directory, which contains all the scripts
   docker run -d \
     -v "$(pwd)"/examples:/$APP \
-    -p "$PORT":"$PORT" \
+    -p $LOCAL_PORT:$PORT \
     $APP:$VERSION
 fi
 
@@ -78,4 +76,4 @@ echo "Running unit tests..."
 sleep 3
 # Unit Tests
 # test_title "[TEST]: Verify 'echo' endpoint returns <value>"
-bats --tap "$DIR/test/$APP.bats"
+bats "$DIR/test/$APP.bats"

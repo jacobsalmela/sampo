@@ -62,9 +62,16 @@ else
   # Cleanup from last run
   # Remove any screen sessions
   # for session in $(screen -ls | grep -o \'$SCREEN_REGEX\'); do screen -S "${session}" -X quit; done >/dev/null
-  # Stop and remove all older running containers
-  docker rm "$(docker stop "$(docker ps -a -q --filter ancestor=$APP:$VERSION --format="{{.ID}}")")"
-  # Run it in a docker container by default, mounting the examples directory, which contains all the scripts
+  # check for running containers of sampo
+  running_containers=$(docker ps -a | awk -v i="^$APP.*" '{if($2~i){print$1}}')
+  if [[ -n "$running_containers" ]]; then
+    # Stop and remove all older running containers
+    # Stop all by a specific version
+    # docker rm "$(docker stop "$(docker ps -a -q --filter ancestor=$APP:$VERSION --format="{{.ID}}")")"
+    # Stop all by image name only
+    docker rm "$(docker stop "$(docker ps -a | awk -v i="^$APP.*" '{if($2~i){print$1}}')")" 2>/dev/null
+    # Run it in a docker container by default, mounting the examples directory, which contains all the scripts
+  fi
   docker run -d \
     -v "$(pwd)"/examples:/$APP \
     -p $LOCAL_PORT:$PORT \

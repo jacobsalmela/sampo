@@ -20,8 +20,7 @@ readonly APP=sampo
 readonly VERSION=1.0.0
 
 # Get the full directory name of the script no matter where it is being called from
-readonly WDIR
-WDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+readonly WDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 # Set a config location depending where we are running from
 # Simple check to see if we're likely in a container
@@ -29,8 +28,7 @@ readonly CONTAINER_CHECK="/proc/1/cgroup"
 
 # Useful logging in the same dir as the script
 # set to readonly--Don't let the path be changed
-readonly LOG_FILE
-LOG_FILE="$WDIR/$(basename "${0%.*}").log"
+readonly LOG_FILE="$WDIR/$(basename "${0%.*}").log"
 
 # If the file does not exist,
 if [[ ! -f "$CONTAINER_CHECK" ]] || [[ "$(cat $CONTAINER_CHECK)" == '/' ]]; then
@@ -215,6 +213,13 @@ fail_with() {
 }
 
 
+# serve_echo() replies an echo of arbitrary text
+serve_echo() {
+   append_header "Content-Type" "text/plain"
+   send_response 200 <<< "$2"
+}
+
+
 serve_file() {
   local filename="$1"
 
@@ -246,6 +251,13 @@ serve_dir_with_ls()
   # Send back the long listing with a 200 return code
   send_response 200 < <(ls -la "$dir")
 }
+
+# uri_decode() decodes URL-encoded strings for easier handling in shell
+uri_decode() {
+  # Taken from https://stackoverflow.com/a/6265305/566849
+  echo -e "$(sed 's/+/ /g;s/%\(..\)/\\x\1/g;')"
+}
+
 
 # match_uri() matches the endpoints being requested by the client using a regular expression
 match_uri() {
@@ -352,7 +364,7 @@ does_endpoint_exist() {
 run_external_script() {
   local script_to_run="$1"
   # use process substitution to send the output of the shell script as an api response: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#Process-Substitution
-  send_response 200 < <(bash "$script_to_run")
+  send_response 200 < <(bash "$script_to_run" 2>&1)
 }
 
 # listen_for_requests()
@@ -369,6 +381,9 @@ listen_for_requests() {
   # The client's request comes in looking like this (so parse them out into variables)
   #       GET            /echo/hi    HTTP/1.1
   read -r REQUEST_METHOD REQUEST_URI REQUEST_HTTP_VERSION <<<"$LINE"
+
+  # Borrowed from https://github.com/avleen/bashttpd/pull/37/files
+  # REQUEST_URI=$(uri_decode <<<"$REQUEST_URI")
 
   # If any of the below are zero values, fail_with 400 as it may not be a proper request
   if [[ -z "$REQUEST_METHOD" ]] \

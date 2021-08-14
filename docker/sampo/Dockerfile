@@ -1,7 +1,7 @@
 # Copyright (C) Jacob Salmela, 2020 <me@jacobsalmela.com>
 # This file is part of sampo
 FROM bash:4.4
-MAINTAINER Jacob Salmela <me@jacobsalmela.com>
+LABEL Jacob Salmela <me@jacobsalmela.com>
 
 RUN apk add --no-cache file netcat-openbsd socat
 
@@ -22,5 +22,5 @@ RUN chmod 755 /sampo.sh
 #         TCP-LISTEN:PORT:    socat will listen locally on the specified port
 #         reuseaddr,fork      When accepting a connection, socat will fork to handle it. This means that it can handle parallel connections, and won't die after the first connection
 #
-CMD socat TCP-LISTEN:1042,reuseaddr,fork,pf=ip4 \
+CMD socat -d -d TCP-LISTEN:1042,reuseaddr,fork,pf=ip4 \
           system:/sampo.sh 2>> /var/log/sampo.log

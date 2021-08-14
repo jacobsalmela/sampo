@@ -3,7 +3,15 @@
 FROM bash:4.4
 LABEL Jacob Salmela <me@jacobsalmela.com>
 
-RUN apk add --no-cache file netcat-openbsd socat
+# file                  for returning Content-Type header
+# netcat-openbsd        for in-container debugging and/or an simpler alternative to socat
+# openssh-client        for remote connections using the host's .ssh/ folder when volume mounted
+# socat                 the main command used to serve the API
+RUN apk add --no-cache \
+    file \
+    netcat-openbsd \
+    openssh-client \
+    socat
 
 EXPOSE 1042
 
@@ -23,4 +31,4 @@ RUN chmod 755 /sampo.sh
 #         reuseaddr,fork      When accepting a connection, socat will fork to handle it. This means that it can handle parallel connections, and won't die after the first connection
 #
 CMD socat -d -d TCP-LISTEN:1042,reuseaddr,fork,pf=ip4 \
-          system:/sampo.sh 2>> /var/log/sampo.log
+          exec:/sampo.sh 2>> /var/log/sampo.log

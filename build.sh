@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+set -e
+set -u
+set -o pipefail
+
 #shellcheck source=./vars.bash
 source ./vars.bash
 
@@ -113,7 +117,8 @@ build_docker() {
   # for session in $(screen -ls | grep -o \'$SCREEN_REGEX\'); do screen -S "${session}" -X quit; done >/dev/null
   # check for running containers of sampo
   # running_containers=$(docker ps -a | awk -v i="^$APP.*" '{if($2~i){print$1}}')
-  running_containers=$(docker ps -a -q --filter ancestor="$APP":"$VERSION" --format="{{.ID}}")
+  # running_containers=$(docker ps -a -q --filter ancestor="$APP":"$VERSION" --format="{{.ID}}")
+  running_containers=$(docker ps -a -q --format="{{.ID}}")
   if [[ -n "$running_containers" ]]; then
     # Stop and remove all older running containers
     # Stop all by a specific version
@@ -126,15 +131,19 @@ build_docker() {
     done
     # Run it in a docker container by default, mounting the examples directory, which contains all the scripts
   fi
+  sleep 5
+  echo "Running new container"
   docker run -d \
     -v "$(pwd)"/examples:/"$APP" \
-    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$HOME"/.ssh:/root/.ssh:ro \
     -p "$LOCAL_PORT":"$PORT" \
     "$APP":"$VERSION"
+  docker container ls | grep "$APP"
   sleep 3
   run_unit_tests
-  echo -e "To debug this container, run:\n"
-  echo "    docker exec -it $(docker ps -a | awk -v i="^sampo.*" '{if($2~i){print$1}}') bash"
+  echo -e "Useful commands for developing this container, run:\n"
+  echo -e "    docker exec -it $(docker ps -a | awk -v i="^sampo.*" '{if($2~i){print$1}}') bash\n"
+  echo -e "    curl http://localhost:$LOCAL_PORT/\n"
 }
 
 if [[ $# -eq 0 ]]; then

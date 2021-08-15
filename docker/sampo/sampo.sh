@@ -209,8 +209,12 @@ send_response() {
 
 # serve_echo() replies an echo of arbitrary text
 serve_echo() {
-   append_header "Content-Type" "text/plain"
-   send_response 200 <<< "$2"
+  append_header "Content-Type" "text/plain"
+  if [[ -z "$2" ]]; then
+    send_response 400 <<< "Expected an argument"
+  else
+    send_response 200 <<< "$2"
+  fi
 }
 
 
@@ -344,7 +348,7 @@ does_endpoint_exist() {
 
   if [[ ! "${ENDPOINTS_FUNCTIONS[*]}" =~ ${REQUEST_URI} ]]; then
       # whatever you want to do when array doesn't contain value
-      send_response 404 <<< "404 ${REQUEST_URI} does not exist"
+      send_response 404 <<< "${REQUEST_URI} does not exist"
       return 1
   fi
 
@@ -355,7 +359,7 @@ does_endpoint_exist() {
 run_external_script() {
   local script_to_run="$1"
   # use process substitution to send the output of the shell script as an api response: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#Process-Substitution
-  send_response 200 < <(bash "$script_to_run" 2>&1)
+  send_response 200 < <("$script_to_run" 2>&1)
 }
 
 # listen_for_requests()

@@ -3,7 +3,7 @@
 FROM bash:4.4
 LABEL Jacob Salmela <me@jacobsalmela.com>
 
-# file                  for returning Content-Type header
+# file                  for returning Content-Type and Content-Lenght headers
 # netcat-openbsd        for in-container debugging and/or an simpler alternative to socat
 # openssh-client        for remote connections using the host's .ssh/ folder when volume mounted
 # socat                 the main command used to serve the API

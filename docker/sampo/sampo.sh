@@ -33,7 +33,7 @@ readonly LOG_FILE="$WDIR/$(basename "${0%.*}").log"
 # If the file does not exist,
 if [[ ! -f "$CONTAINER_CHECK" ]] || [[ "$(cat $CONTAINER_CHECK)" == '/' ]]; then
   # We might be on macOS or some other Darwin-like system that doesn't use /proc
-  readonly CONFIG="$WDIR/$APP/$APP.conf"
+  readonly CONFIG="$WDIR/$APP.conf"
 
   # Log to stdout and to a log file if we're not in a container
   log() { echo -e "$*" | tee -a "$LOG_FILE" >&2 ; }
@@ -64,13 +64,15 @@ readonly ACCEPT_LANG="en-US"
 
 # receive() receives data from the client
 receive() {
-  log "REQUEST: " "$@" >&2;
+  log
+  log "=====> REQUEST: " "$@" >&2;
+  log
 }
 
 
 # respond() sends data back to the client.  This is the response from the API
 respond() {
-  log "RESPONSE: " "$@" >&2; printf '%s\r\n' "$*"
+  log "<==   RESPONSE: " "$@" >&2; printf '%s\r\n' "$*"
 }
 
 
@@ -205,14 +207,6 @@ send_response() {
 }
 
 
-fail_with() {
-  # If we need to fail, we can fail with a specific code
-  local code="$1"
-  send_response "$code" <<< "$code ${RESPONSE_CODE[$code]}"
-  exit 0
-}
-
-
 # serve_echo() replies an echo of arbitrary text
 serve_echo() {
    append_header "Content-Type" "text/plain"
@@ -232,7 +226,7 @@ serve_file() {
   # Also get the length so that can be returned as well
   read -r CONTENT_LENGTH < <(stat -c'%s' "$filename")
 
-  # Append this as well to the array, RESPONSE_HEADERS
+  # Do the same for the file's size, RESPONSE_HEADERS
   append_header "Content-Length" "$CONTENT_LENGTH"
 
   # Send the content of the file
@@ -343,20 +337,17 @@ does_endpoint_exist() {
   # Check if the endpoint the user requested actually exists
   detect_endpoints
 
-  # for endpoint in "${ENDPOINTS_FUNCTIONS[@]}"
-  # do
-  #   # key (endpoint)
-  #   endpoint="${endpoint%%:*}"
-  #
-  #   # Create an array of just
-  #   ENDPOINTS+=("$endpoint")
-  # done
-  #
-  # if [[ "${REQUEST_URI}" =~ ${ENDPOINTS[*]} ]]; then
-  #   echo endpoint found
-  # else
-  #   fail_with 405
-  # fi
+  if [[ ${ENDPOINTS_FUNCTIONS[*]} =~ ${REQUEST_URI} ]]; then
+    # whatever you want to do when array contains value
+    return 0
+  fi
+
+  if [[ ! "${ENDPOINTS_FUNCTIONS[*]}" =~ ${REQUEST_URI} ]]; then
+      # whatever you want to do when array doesn't contain value
+      send_response 404 <<< "404 ${REQUEST_URI} does not exist"
+      return 1
+  fi
+
 }
 
 # run_external_script() executes an arbitrary shell script
@@ -373,7 +364,7 @@ listen_for_requests() {
   # It fomats the request appropriately and saves it into vars for use in other functions
 
   # Read in the request from the client
-  read -r LINE || fail_with 400
+  read -r LINE || send_response 400
 
   # strip trailing CR
   LINE=${LINE%%$'\r'}
@@ -385,11 +376,11 @@ listen_for_requests() {
   # Borrowed from https://github.com/avleen/bashttpd/pull/37/files
   # REQUEST_URI=$(uri_decode <<<"$REQUEST_URI")
 
-  # If any of the below are zero values, fail_with 400 as it may not be a proper request
+  # If any of the below are zero values, fail with 400 as it may not be a proper request
   if [[ -z "$REQUEST_METHOD" ]] \
      || [[ -z "$REQUEST_URI" ]] \
      || [[ -z "$REQUEST_HTTP_VERSION" ]]; then
-        fail_with 400
+        send_response 400 <<< "\$REQUEST_METHOD:$REQUEST_METHOD \$REQUEST_URI:$REQUEST_URI \$REQUEST_HTTP_VERSION:$REQUEST_HTTP_VERSION"
   fi
 
   # if [[ "$REQUEST_METHOD" == "GET" ]]; then
@@ -405,9 +396,9 @@ listen_for_requests() {
   # fi
 
   # check first if the endpoint exists
-  does_endpoint_exist
-
-  receive "$LINE"
+  if eval does_endpoint_exist; then
+    receive "$LINE"
+  fi
 }
 
 

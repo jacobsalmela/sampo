@@ -31,4 +31,4 @@ RUN chmod 755 /sampo.sh
 #         reuseaddr,fork      When accepting a connection, socat will fork to handle it. This means that it can handle parallel connections, and won't die after the first connection
 #
 CMD socat -d -d TCP-LISTEN:1042,reuseaddr,fork,pf=ip4 \
-          exec:/sampo.sh 2>> /var/log/sampo.log
+          exec:/sampo.sh

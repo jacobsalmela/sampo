@@ -33,7 +33,7 @@ readonly LOG_FILE="$WDIR/$(basename "${0%.*}").log"
 # If the file does not exist,
 if [[ ! -f "$CONTAINER_CHECK" ]] || [[ "$(cat $CONTAINER_CHECK)" == '/' ]]; then
   # We might be on macOS or some other Darwin-like system that doesn't use /proc
-  readonly CONFIG="$WDIR/$APP.conf"
+  readonly CONFIG="$WDIR/examples/$APP.conf"
 
   # Log to stdout and to a log file if we're not in a container
   log() { echo -e "$*" | tee -a "$LOG_FILE" >&2 ; }

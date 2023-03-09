@@ -2,9 +2,9 @@ name: Docker
 
 on:
   push:
-    # Publish `master` as Docker `latest` image.
+    # Publish `main` as Docker `latest` image.
     branches:
-      - master
+      - main
 
     # Publish `v1.2.3` tags as releases.
     tags:
@@ -27,12 +27,7 @@ jobs:
 
       - name: Run tests
         run: |
-          if [ -f docker-compose.test.yml ]; then
-            docker-compose --file docker-compose.test.yml build
-            docker-compose --file docker-compose.test.yml run sut
-          else
-            docker build docker/sampo --file docker/sampo/Dockerfile
-          fi
+          ./build.sh -i
 
   # Push image to GitHub Packages.
   # See also https://docs.docker.com/docker-hub/builds/

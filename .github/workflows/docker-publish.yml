@@ -11,7 +11,7 @@ on:
       - v*
 
 env:
-  REGISTRY: ghcr.io
+  REGISTRY: docker.pkg.github.com
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:

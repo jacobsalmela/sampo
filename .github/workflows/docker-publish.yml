@@ -3,7 +3,7 @@ name: build and publish container image
 on:
   push:
     branches:
-      - main
+      - pubs
   # release:
   #   types:
   #     - published

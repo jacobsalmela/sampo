@@ -7,6 +7,8 @@ on:
   # release:
   #   types:
   #     - published
+    tags:
+      - v1.0.01-beta.*
 
 
 env:
@@ -35,7 +37,8 @@ jobs:
         id: meta
         uses: docker/metadata-action@v4
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          images: ${{ github.repository }}
+          tags: type=ref,event=tag
 
       - name: build and push container image
         run: |
@@ -45,18 +48,11 @@ jobs:
           echo ${{ github.repository }}
           echo ${{ env.REGISTRY }}
 
-        # with:
-        #   context: ./docker
-        #   file: ./docker/Dockerfile
-        #   push: true
-        #   tags: ${{ steps.meta.outputs.tags }}
-        #   labels: ${{ steps.meta.outputs.labels }}
-
-      # - name: build and push container image
-      #   uses: docker/build-push-action@v4
-      #   with:
-      #     context: ./docker
-      #     file: ./docker/Dockerfile
-      #     push: true
-      #     tags: ${{ steps.meta.outputs.tags }}
-      #     labels: ${{ steps.meta.outputs.labels }}
+      - name: build and push container image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./docker
+          file: ./docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

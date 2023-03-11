@@ -38,7 +38,7 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: ${{ github.repository }}
-          tags: type=ref,event=tag
+          tags: type=semver,pattern={{version}}
 
       - name: build and push container image
         run: |

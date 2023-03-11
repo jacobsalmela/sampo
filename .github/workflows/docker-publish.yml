@@ -38,15 +38,7 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: ${{ github.repository }}
-          tags: type=semver,pattern={{ version }}
-
-      - name: build and push container image
-        run: |
-          echo ${{ steps.meta.outputs.tags }}
-          echo ${{ steps.meta.outputs.labels }}
-          echo ${{ github.actor }}
-          echo ${{ github.repository }}
-          echo ${{ env.REGISTRY }}
+          tags: type=ref,event=tag
 
       - name: build and push container image
         uses: docker/build-push-action@v4

@@ -1,0 +1,12 @@
+--- a/sampo.sh
++++ b/sampo.sh
+@@ -513,7 +513,8 @@
+   export REQUEST_METHOD REQUEST_URI
+   export CONTENT_LENGTH="${REQUEST_CONTENT_LENGTH:-0}" CONTENT_TYPE="${REQUEST_CONTENT_TYPE:-}"
+ 
+-  if [[ "$REQUEST_METHOD" == "GET" ]]; then
++  # every route receives all four methods: its handler checks $REQUEST_METHOD and answers 405 itself
++  if [[ "$REQUEST_METHOD" =~ ^(GET|POST|PUT|DELETE)$ ]]; then
+     :  
+   else
+     send_response 501 < <(echo "$REQUEST_METHOD is invalid or not yet implemented. $FUNDING")

@@ -1,0 +1,32 @@
+--- a/sampo.conf
++++ b/sampo.conf
+@@ -120,5 +120,29 @@
+     # # A simple echo endpoint to returns arbitrary text with a given argument
+     # match_uri '^/fork/(.*)$' \
+     #   rusty_fork
++
++    # A pub/sub app that uses GET, POST, PUT and DELETE (see pubsub.sh)
++    # Every route receives every method, so each handler checks $REQUEST_METHOD itself
++    source "${SAMPO_BASE}"/pubsub.sh
++    topics_resource() {
++      case "$REQUEST_METHOD" in
++        GET)    topic_list ;;
++        *)      append_header "Allow" "GET"; fail_with 405 ;;
++      esac
++    }
++    topic_resource() {
++      case "$REQUEST_METHOD" in
++        GET)    topic_subscribe "$2" ;;
++        PUT)    topic_create "$2" ;;
++        POST)   topic_publish "$2" ;;
++        DELETE) topic_delete "$2" ;;
++        *)      append_header "Allow" "GET,PUT,POST,DELETE"; fail_with 405 ;;
++      esac
++    }
++    match_uri '^/topics$' topics_resource
++    match_uri '^/topics/(.+)$' topic_resource
++
++    # External scripts get the method in $REQUEST_METHOD and the body on STDIN
++    match_uri '^/inspect$' run_external_script "${SAMPO_BASE}"/scripts/inspect.sh
+   fi
+ fi

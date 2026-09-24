@@ -1,0 +1,12 @@
+--- a/sampo.sh
++++ b/sampo.sh
+@@ -130,7 +130,8 @@
+ # container_check() checks to see if the script is running in a container by looking at cgroups
+ # it also checks if it is running on kubernetes via a variable 
+ container_check() {
+-  if [[ -f "$CONTAINER_CHECK" ]] ; then
++  # /proc/1/cgroup exists on every Linux host, so also require that PID 1's STDOUT is writable
++  if [[ -f "$CONTAINER_CHECK" ]] && [[ -w /proc/1/fd/1 ]]; then
+     if [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]]; then
+       # Check next if running in Kubernetes
+       LOGTO="STDOUT"

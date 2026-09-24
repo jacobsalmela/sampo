@@ -1,0 +1,73 @@
+--- a/sampo.sh
++++ b/sampo.sh
+@@ -226,6 +226,13 @@
+ }
+ 
+ 
++# read_body() reads exactly $1 bytes of the request body into REQUEST_BODY
++# LC_ALL=C makes read -N count bytes (like Content-Length does) instead of characters
++read_body() {
++  local LC_ALL=C
++  IFS= read -r -N "$1" REQUEST_BODY || true
++}
++
+ # fail_with() pseudo-fails the script with a given response code
+ fail_with() {
+   local code="$1"
+@@ -414,7 +421,8 @@
+     debuggy "[$(basename "${BASH_SOURCE[0]}"):${LINENO}:${FUNCNAME[*]:0:${#FUNCNAME[@]}-1}()] running external script: $script_to_run ${args[*]}"
+   fi
+   retval=200
+-  result="$("${script_to_run}" "${args[@]}" 2>&1)" || retval=500
++  # the request body, if any, is the script's STDIN
++  result="$("${script_to_run}" "${args[@]}" 2>&1 < <(printf '%s' "${REQUEST_BODY:-}"))" || retval=500
+   send_response $retval <<< "$result"
+ }
+ 
+@@ -461,12 +469,12 @@
+     header_value="${LINE#*: }"
+ 
+     case "$header_key" in
+-      # Content-Length)
+-      #   REQUEST_CONTENT_LENGTH="$header_value"
+-      #   ;;
+-      # Content-Type)
+-      #   REQUEST_CONTENT_TYPE="$header_value"
+-      #   ;;
++      [Cc]ontent-[Ll]ength)
++        REQUEST_CONTENT_LENGTH="$header_value"
++        ;;
++      [Cc]ontent-[Tt]ype)
++        REQUEST_CONTENT_TYPE="$header_value"
++        ;;
+       Host)
+         REQUEST_HOST="$header_value"
+         ;;
+@@ -484,6 +492,27 @@
+     REQUEST_HEADERS+=("$LINE")
+   done
+ 
++  # Read the request body (sent with POST and PUT) into REQUEST_BODY
++  REQUEST_BODY=""
++  if [[ -n "${REQUEST_CONTENT_LENGTH:-}" ]]; then
++    # validate before doing any math: bash evaluates the contents of variables inside (( ))
++    if [[ ! "$REQUEST_CONTENT_LENGTH" =~ ^[0-9]+$ ]]; then
++      fail_with 400
++    elif [[ ${#REQUEST_CONTENT_LENGTH} -gt 9 ]] || (( 10#$REQUEST_CONTENT_LENGTH > ${SAMPO_MAX_BODY:-1048576} )); then
++      fail_with 413
++    fi
++    read_body "$REQUEST_CONTENT_LENGTH"
++  fi
++
++  # endpoint_exists() has already answered with a 404, so there is nothing left to do
++  if [[ -n "${STATUS_CODE:-}" ]]; then
++    exit 0
++  fi
++
++  # Like CGI, hand the method and body details to external scripts through the environment
++  export REQUEST_METHOD REQUEST_URI
++  export CONTENT_LENGTH="${REQUEST_CONTENT_LENGTH:-0}" CONTENT_TYPE="${REQUEST_CONTENT_TYPE:-}"
++
+   if [[ "$REQUEST_METHOD" == "GET" ]]; then
+     :  
+   else

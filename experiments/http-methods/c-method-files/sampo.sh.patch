@@ -1,0 +1,88 @@
+--- a/sampo.sh
++++ b/sampo.sh
+@@ -313,6 +313,46 @@
+ }
+ 
+ 
++# route_file() answers the request from routes/ when routes/ has a directory for its path:
++#   routes/NAME/METHOD.sh handles METHOD /NAME, and a directory named @ matches any one path
++#   segment and passes it on as an argument, e.g. routes/topics/@/PUT.sh handles PUT /topics/news
++#   with $1=news.  Handlers are sourced, so they can use send_response() and friends.
++# it exits once it has answered, and returns otherwise, leaving the request to sampo.conf
++route_file() {
++  local dir="$DIR/routes" segment
++  local -a segments=() args=()
++  IFS=/ read -r -a segments <<< "${REQUEST_URI#/}"
++  for segment in "${segments[@]}"; do
++    # only plain names can select a directory, which also rules out ../
++    if [[ "$segment" =~ ^[A-Za-z0-9_-]+$ ]] && [[ -d "$dir/$segment" ]]; then
++      dir="$dir/$segment"
++    elif [[ -d "$dir/@" ]]; then
++      dir="$dir/@"
++      args+=("$segment")
++    else
++      return 0
++    fi
++  done
++  if [[ "$dir" == "$DIR/routes" ]]; then
++    return 0
++  fi
++
++  if [[ ! "$REQUEST_METHOD" =~ ^(GET|POST|PUT|DELETE)$ ]]; then
++    send_response 501 < <(echo "$REQUEST_METHOD is invalid or not yet implemented. $FUNDING")
++  elif [[ -f "$dir/$REQUEST_METHOD.sh" ]]; then
++    #shellcheck source=/dev/null
++    source "$dir/$REQUEST_METHOD.sh" "${args[@]}"
++  else
++    # the Allow header lists the methods that do have a file
++    local -a allowed=("$dir"/*.sh)
++    allowed=("${allowed[@]##*/}")
++    append_header "Allow" "$(IFS=,; echo "${allowed[*]%.sh}")"
++    fail_with 405
++  fi
++  exit 0
++}
++
++
+ # list_function() lists the names of all the defined functions
+ list_functions() {
+   declare -F | awk '{print $3}'
+@@ -366,7 +406,17 @@
+ list_endpoints() {
+   append_header "Content-Type" "text/plain"
+ 
+-  send_response 200 < <(printf '%s\n' "${ENDPOINTS_FUNCTIONS[@]}")
++  send_response 200 < <(printf '%s\n' "${ENDPOINTS_FUNCTIONS[@]}"; list_file_routes)
++}
++
++# list_file_routes() lists the handlers in routes/ as "METHOD /path:file"
++list_file_routes() {
++  local file route
++  [[ -d "$DIR/routes" ]] || return 0
++  while IFS= read -r file; do
++    route="${file#"$DIR"/routes}"
++    printf '%s %s:%s\n' "$(basename "$route" .sh)" "${route%/*}" "routes$route"
++  done < <(find "$DIR/routes" -name '*.sh' | sort)
+ }
+ 
+ 
+@@ -379,7 +429,8 @@
+   ENDPOINT=/${ENDPOINT%%/*}
+ 
+   # https://stackoverflow.com/a/15394738
+-  if [[ ${ENDPOINTS[*]} =~ ${ENDPOINT} ]]; then
++  # (a directory in routes/ is an endpoint too)
++  if [[ ${ENDPOINTS[*]} =~ ${ENDPOINT} ]] || [[ -d "$DIR/routes$ENDPOINT" ]]; then
+     # return 0 if the endpoint exists
+     return 0
+   fi
+@@ -513,6 +564,9 @@
+   export REQUEST_METHOD REQUEST_URI
+   export CONTENT_LENGTH="${REQUEST_CONTENT_LENGTH:-0}" CONTENT_TYPE="${REQUEST_CONTENT_TYPE:-}"
+ 
++  # routes/ answers any method it has a file for; sampo.conf routes stay GET only
++  route_file
++
+   if [[ "$REQUEST_METHOD" == "GET" ]]; then
+     :  
+   else

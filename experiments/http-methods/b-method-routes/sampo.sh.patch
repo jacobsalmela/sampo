@@ -1,0 +1,92 @@
+--- a/sampo.sh
++++ b/sampo.sh
+@@ -120,6 +120,9 @@
+   # [511]="Network_Authentication_Required"
+ )
+ 
++# The methods of routes that matched the request's path but not its method (see match_uri)
++declare -a ALLOWED_METHODS=()
++
+ # Check the control groups of the init process, which vary depending on the OS vs. container
+ readonly CONTAINER_CHECK="/proc/1/cgroup"
+ readonly CONFIG="$DIR/$APP.conf"
+@@ -286,7 +289,14 @@
+ 
+ 
+ # match_uri() matches a URI against a regex and calls a function if it matches
++# usage: match_uri [METHOD] REGEX command [args]
++# METHOD is GET, POST, PUT or DELETE; a route without one is a GET route, as before
+ match_uri() {
++  local method="GET"
++  if [[ "$1" =~ ^(GET|POST|PUT|DELETE)$ ]]; then
++    method="$1"
++    shift
++  fi
+   local regex="$1"
+   # shift to the next parameter
+   shift
+@@ -297,6 +307,11 @@
+ 
+   # if the REQUEST_URI matches the regex passed in as the first argument,
+   if [[ $REQUEST_URI =~ $regex ]]; then
++    # the path matches, but this route is for another method: remember it for a 405's Allow header
++    if [[ "$REQUEST_METHOD" != "$method" ]]; then
++      ALLOWED_METHODS+=("$method")
++      return 0
++    fi
+     # the matched part of the REQUEST_URI above is stored in the BASH_REMATCH array
+     # the unmatched part may comprise path and query parameters: pass them on, too
+     local unmatched="${REQUEST_URI#${BASH_REMATCH[0]}}"
+@@ -335,7 +350,7 @@
+   ENDPOINTS_FUNCTIONS=()
+   ENDPOINTS=()
+   # search for all the endpoints defined and the functions they call in the config file
+-  while read -r endpoint
++  while read -r method endpoint
+   do
+     # get just the endpoint name
+     # % * here means remove the string from the end of the variable's contents
+@@ -349,14 +364,15 @@
+ 
+     # Append it to the ENDPOINTS_FUNCTIONS array,
+     # So we have a hacky "dictionary" of an endpoint and it's associated function that it calls
+-    ENDPOINTS_FUNCTIONS+=("$e:$f")
++    ENDPOINTS_FUNCTIONS+=("$method $e:$f")
+     # Create an array of just
+     ENDPOINTS+=("$e")
+   # seach for match_uri lines in the config file
+   # and put the endpoint name and the function it calls into an array
+   # due to whitespace in the config, check the first field for match_uri
+   # remove all non-alphanumeric characters and newlines since they code definitions span multiple lines
+-  done  < <(awk '{if ($1 ~ /^match_uri/) print $2, $3}' "$CONFIG" | tr -dc '[:alnum:][:space:]/_\n\r' | sort)
++  # a route without a method is a GET route
++  done  < <(awk '{if ($1 ~ /^match_uri/) { if ($2 !~ /^(GET|POST|PUT|DELETE)$/) $0 = $1 " GET " $2 " " $3; print $2, $3, $4 }}' "$CONFIG" | tr -dc '[:alnum:][:space:]/_\n\r' | sort -k2,2 -k1,1)
+   # done < <(awk '/^match_uri/ {print $2, $3}' "$CONFIG" | tr -d '[:alnum:][:space:]/_\n\r' | sort)
+ }
+ 
+@@ -513,7 +529,8 @@
+   export REQUEST_METHOD REQUEST_URI
+   export CONTENT_LENGTH="${REQUEST_CONTENT_LENGTH:-0}" CONTENT_TYPE="${REQUEST_CONTENT_TYPE:-}"
+ 
+-  if [[ "$REQUEST_METHOD" == "GET" ]]; then
++  # match_uri() decides which method each route accepts
++  if [[ "$REQUEST_METHOD" =~ ^(GET|POST|PUT|DELETE)$ ]]; then
+     :  
+   else
+     send_response 501 < <(echo "$REQUEST_METHOD is invalid or not yet implemented. $FUNDING")
+@@ -542,6 +559,15 @@
+   # when a client queries sampo, the request is checked against what is defined there
+   #shellcheck source=sampo.conf
+   source "${CONFIG}"
++
++  # no route answered: the path only has routes for other methods (405), or no route at all (404)
++  if [[ -z "${STATUS_CODE:-}" ]]; then
++    if [[ ${#ALLOWED_METHODS[@]} -gt 0 ]]; then
++      append_header "Allow" "$(IFS=,; echo "${ALLOWED_METHODS[*]}")"
++      fail_with 405
++    fi
++    fail_with 404
++  fi
+ else
+   # this script is being sourced so do not run the functions
+   # this helps with unit tests and/or other scripts needing to utilize the functions defined here

@@ -1,0 +1,20 @@
+--- a/sampo.conf
++++ b/sampo.conf
+@@ -120,5 +120,17 @@
+     # # A simple echo endpoint to returns arbitrary text with a given argument
+     # match_uri '^/fork/(.*)$' \
+     #   rusty_fork
++
++    # A pub/sub app that uses GET, POST, PUT and DELETE (see pubsub.sh)
++    # Name the method before the regex; a route without one only answers GET
++    source "${SAMPO_BASE}"/pubsub.sh
++    match_uri GET    '^/topics$'      topic_list
++    match_uri GET    '^/topics/(.+)$' topic_subscribe
++    match_uri PUT    '^/topics/(.+)$' topic_create
++    match_uri POST   '^/topics/(.+)$' topic_publish
++    match_uri DELETE '^/topics/(.+)$' topic_delete
++
++    # External scripts get the method in $REQUEST_METHOD and the body on STDIN
++    match_uri POST '^/inspect$' run_external_script "${SAMPO_BASE}"/scripts/inspect.sh
+   fi
+ fi

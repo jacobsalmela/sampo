@@ -71,6 +71,18 @@ test_valid_json(){
     assert_output '200'
 }
 
+@test "test that the 'file' endpoint keeps indentation and a last line without a newline" {
+  # the server reads the fixture by its absolute path on the host
+  # ./build.sh -d mounts test/fixtures at the same path in the container
+  local fixture="${BATS_TEST_DIRNAME}/fixtures/indented_no_trailing_newline.txt"
+  local expected=$'    indented line\n\ttab-indented line\nlast line without newline'
+  # the fixture must stay byte for byte: trimming its indentation or adding a final newline would hide the bug
+  assert_files_equal "$fixture" <(printf '%s' "$expected")
+  run test_curl "http://localhost:${PORT:-1042}/file/${fixture}"
+  assert_success
+  assert_output "$expected"
+}
+
 @test "test that the 'dir' endpoint responds with expected data" {
   run test_curl http://localhost:${PORT:-1042}/dir//
   assert_success

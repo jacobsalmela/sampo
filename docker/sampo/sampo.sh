@@ -214,8 +214,10 @@ send_response() {
   # send a blank line
   respond
 
-  #
-  while read -r LINE; do
+  # then send the body line by line
+  # IFS= keeps leading and trailing whitespace on each line,
+  # and the -n check still sends a last line that has no trailing newline
+  while IFS= read -r LINE || [[ -n "$LINE" ]]; do
     respond "$LINE"
   done
   

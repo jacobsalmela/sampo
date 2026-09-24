@@ -374,10 +374,12 @@ build_run_docker() {
   echo "Starting new container"
   # Run the new container mounting the examples folder for the sample scripts
   # -v "docker/sampo":/sampo:ro \
+  # Mount the test fixtures at the same path as on the host, so the integration tests can request them through /file/
   docker run -d \
     --name "$APP" \
     --rm \
     -p "$LOCAL_PORT":"$PORT" \
+    -v "$DIR/test/fixtures":"$DIR/test/fixtures":ro \
     "$APP":"$VERSION"
   run_integration_tests
   docker container ls -a

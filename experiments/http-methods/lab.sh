@@ -26,7 +26,9 @@ BASELINE=294d3b75c54e1cdb4a722a882fc0caa6c0a47453
 #/   'original' is sampo as it was before any of them, and 'current' is docker/sampo as it
 #/   is now (which has option B), with the pub/sub app wired up the way option B does it
 #/
-#/   build OPTION DIR       put a runnable sampo folder for OPTION in DIR
+#/   build OPTION DIR [--no-app]
+#/                          put a runnable sampo folder for OPTION in DIR (--no-app: without the
+#/                          pub/sub app, and with the stock sampo.conf)
 #/   serve OPTION [PORT]    serve OPTION on PORT (default 1042) until Ctrl-C
 #/   demo OPTION [PORT]     serve OPTION and stream a topic to this terminal while publishing to it
 #/   test [OPTION...]       run test/pubsub.bats against each OPTION (default: all three)
@@ -306,7 +308,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   command="${1:-}"
   shift || true
   case "$command" in
-    build)  [[ $# -eq 2 ]] || { usage; exit 1; }; lab_build "$@" ;;
+    build)  [[ $# -eq 2 || $# -eq 3 ]] || { usage; exit 1; }; lab_build "$@" ;;
     serve)  [[ $# -ge 1 ]] || { usage; exit 1; }; lab_serve "$@" ;;
     demo)   [[ $# -ge 1 ]] || { usage; exit 1; }; lab_demo "$@" ;;
     test)   lab_test "$@" ;;

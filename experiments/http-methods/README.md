@@ -1,20 +1,22 @@
 # Adding POST, PUT and DELETE to sampo
 
-Today sampo only answers `GET`. Any other method gets a `501`, and request bodies are never read. This directory tries three ways of adding `POST`, `PUT` and `DELETE`. It tests each one with the same small pub/sub app, which streams messages to a terminal, and then recommends one.
+Before this work, sampo only answered `GET`. Any other method got a `501`, and request bodies were never read. This directory tries three ways of adding `POST`, `PUT` and `DELETE`. It tests each one with the same small pub/sub app, which streams messages to a terminal, and then recommends one.
 
-**Recommendation: option B, method-aware routes.** `match_uri` takes an optional method before the regex (`match_uri POST '^/topics/(.+)$' topic_publish`), and a route without one only answers `GET`, as every route does today. See [why B](#why-b).
+**Option B, method-aware routes, was chosen and is now in `docker/sampo`.** `match_uri` takes an optional method before the regex (`match_uri POST '^/topics/(.+)$' topic_publish`), and a route without one only answers `GET`, as every route did before. See [why B](#why-b).
 
-Nothing outside this directory changes. Each option is the stock `docker/sampo` folder plus patches, and `lab.sh` puts it together.
+Each option is `docker/sampo` as it was at commit `294d3b7`, before option B went into it, plus patches. `lab.sh` puts each option together, so the comparison still runs. `docker/sampo/sampo.sh` is now exactly the file `lab.sh` builds for option B.
 
 ## Try it
 
-You need `socat` (as for `./build.sh -l`) and bash 4.4 or newer as `bash` on your `PATH`. Today's sampo already needs bash 4.4 ([finding 6](#other-things-i-found)); on a Mac that means `brew install bash`. Docker works as well.
+You need `socat` (as for `./build.sh -l`) and bash 4.4 or newer as `bash` on your `PATH`. sampo needed bash 4.4 even before these changes ([finding 6](#other-things-i-found)); on a Mac that means `brew install bash`. Docker works as well.
 
 ```bash
 cd experiments/http-methods
 ./lab.sh demo b      # serve option b, then stream a topic to this terminal while publishing to it
 ./lab.sh serve b     # or serve it on port 1042 and use curl from a few terminals:
 ```
+
+Replace `b` with `current` to run the pub/sub app on `docker/sampo` as it is now.
 
 ```bash
 curl -X PUT -d 'Daily headlines' localhost:1042/topics/news   # create a topic
@@ -44,8 +46,8 @@ This is what `./lab.sh demo b` printed. Lines starting with `|` are what the sub
 
 To run it in sampo's image instead of on your machine, use `SAMPO_DOCKER_IMAGE=ghcr.io/jacobsalmela/sampo/sampo:1.0.0 ./lab.sh demo b`. I couldn't download that image where I tested, so that command is untested; the closest setup I could run is described under [results](#results). The other commands are:
 
-- `./lab.sh test` runs the pub/sub tests against all three options.
-- `./lab.sh regress` runs sampo's own integration tests against each option.
+- `./lab.sh test` runs the pub/sub tests against all three options, and `./lab.sh test current` runs them against `docker/sampo`.
+- `./lab.sh regress` runs sampo's integration tests from commit `294d3b7` against each option. `./lab.sh regress current` runs today's tests against `docker/sampo`.
 - `./lab.sh matrix` prints the status code table [below](#results).
 
 ## The pub/sub app
@@ -193,28 +195,27 @@ These are the status codes each version answers the same requests with (`./lab.s
    - C leaves existing endpoints alone, but by putting new ones somewhere else, under different rules.
 2. **It keeps sampo's model.** sampo.conf lists the endpoints and scripts/ holds the scripts. Users learn one optional word per route, and sampo.conf remains the single place to read the API from, methods included.
 3. **It gets the HTTP details right by default.** The 405, the `Allow` header and the 404 come from the route table, instead of relying on every handler's author to remember them. In A, the `DELETE /topics` test passes only because I wrote that `case` by hand.
-4. **It's small and easy to review.** It changes 28 lines, most of them in `match_uri`, and users don't see any difference until they give a route a method.
+4. **It's small and easy to review.** It changes 28 lines, most of them in `match_uri`. Until users give a route a method, the only differences they see are the method column in the `/` listing, and a 405 where sampo used to send a 501.
 5. **It doesn't rule out the others.** A handler wired to several methods can still check `$REQUEST_METHOD`, as in A. File routes, as in C, could later be added on top of the same `match_uri`.
 
-## Next steps, if you pick B
+## Next steps
 
-1. Apply the patches to `docker/sampo`: `patch -p1 -d docker/sampo < …` with `common/0-linux-logging.patch`, `common/1-request-body.patch` and `b-method-routes/sampo.sh.patch`. Then update the `/` expectation in `test/sampo_integration.bats`.
-2. Let external scripts stream and choose their own status code. Today `run_external_script` waits for all of a script's output and answers 200 or 500, which is why the pub/sub handlers are sourced functions. The CGI answer is to have the script print a `Status:` line and headers before its output. This is needed whichever option you pick.
+1. **Done:** `docker/sampo/sampo.sh` now has `common/0-linux-logging.patch`, `common/1-request-body.patch` and `b-method-routes/sampo.sh.patch`, unchanged. `sampo.conf` and the README document the method argument, and `sampo.conf` has a `POST /example` rule. `test/sampo_integration.bats` covers the new behavior.
+2. Let external scripts stream and choose their own status code. `run_external_script` still waits for all of a script's output and answers 200 or 500, which is why the pub/sub handlers are sourced functions. The CGI answer is to have the script print a `Status:` line and headers before its output.
 3. Decide what `HEAD` and `OPTIONS` should do; both still get a 501. `HEAD` could be answered as `GET` without the body, and `OPTIONS` from the route table.
-4. Document the method argument in the README and in sampo.conf's comments.
 
 ## Other things I found
 
-These issues are in sampo today, independent of adding methods:
+These issues were already in sampo, independent of adding methods. The first three are fixed in `docker/sampo` now:
 
-1. **On Linux hosts, every response ends with a `** FAILURE **` banner.**
-   - `container_check` decides sampo runs in a container whenever `/proc/1/cgroup` exists, and that file exists on every Linux machine. So sampo logs to `/proc/1/fd/1`, which fails unless it can write to PID 1's STDOUT. The `ERR` trap then prints the banner into the response.
+1. **On Linux hosts, every response ended with a `** FAILURE **` banner (fixed).**
+   - `container_check` decides sampo runs in a container whenever `/proc/1/cgroup` exists, and that file exists on every Linux machine. So sampo logged to `/proc/1/fd/1`, which fails unless it can write to PID 1's STDOUT. The `ERR` trap then printed the banner into the response.
    - [`common/0-linux-logging.patch`](common/0-linux-logging.patch) fixes this in one line by also checking that the file is writable. `lab.sh` applies it to every build, including `original`.
-2. **A request with any method other than `GET` to an unknown path gets two responses**, a 404 and then a 501. The shared patch fixes this.
-3. **A path that starts like an endpoint but matches no route, such as `/example/extra`, gets an empty reply.** B's 404 fixes this.
+2. **A request with any method other than `GET` to an unknown path got two responses**, a 404 and then a 501 (fixed by the shared patch).
+3. **A path that starts like an endpoint but matches no route, such as `/example/extra`, got an empty reply** (fixed by B's 404).
 4. **`send_response` strips leading whitespace from every line, and drops a last line that has no newline.** A file containing `    indented` followed by `last` without a newline is served as just `indented`. Changing the loop to `while IFS= read -r LINE || [[ -n $LINE ]]` would fix it.
 5. **sampo.conf adds about 14 ms to every request**, because `$(basename ${0})` and `$(dirname …)` start new processes. Parameter expansion would make each request about a third faster.
-6. **On bash 3.2, which macOS ships as `/bin/bash`, every `run_external_script` route answers 500.** The error is `args[@]: unbound variable`: with `set -u`, bash before 4.4 treats an empty array as unset. So sampo already needs bash 4.4, and these patches don't raise that requirement.
+6. **On bash 3.2, which macOS ships as `/bin/bash`, every `run_external_script` route answers 500.** The error is `args[@]: unbound variable`: with `set -u`, bash before 4.4 treats an empty array as unset. So sampo already needed bash 4.4, and these changes don't raise that requirement.
 
 One more thing, useful to anyone writing handlers that process request bodies. When a string doesn't end with the pattern, `${var%pattern}` takes time quadratic in the string's length. It took 4.5 s on a 900 KB string, and 39 s under a UTF-8 locale. A benchmark caught this in `pubsub.sh`, which now avoids it.
 

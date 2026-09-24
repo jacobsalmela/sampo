@@ -201,19 +201,19 @@ These are the status codes each version answers the same requests with (`./lab.s
 ## Next steps
 
 1. **Done:** `docker/sampo/sampo.sh` now has `common/0-linux-logging.patch`, `common/1-request-body.patch` and `b-method-routes/sampo.sh.patch`, unchanged. `sampo.conf` and the README document the method argument, and `sampo.conf` has a `POST /example` rule. `test/sampo_integration.bats` covers the new behavior.
-2. Let external scripts stream and choose their own status code. `run_external_script` still waits for all of a script's output and answers 200 or 500, which is why the pub/sub handlers are sourced functions. The CGI answer is to have the script print a `Status:` line and headers before its output.
-3. Decide what `HEAD` and `OPTIONS` should do; both still get a 501. `HEAD` could be answered as `GET` without the body, and `OPTIONS` from the route table.
+2. **Done:** scripts can stream and choose their own status code. With `run_cgi_script` instead of `run_external_script`, a script starts its output with headers, such as a `Status:` line, then a blank line, and sampo sends the rest as the script writes it. `run_external_script` still waits for a script's output and answers 200 or 500, as before. The pub/sub handlers in this directory are still sourced functions, which is all they need.
+3. **Done:** `HEAD` is answered by `GET` routes, without the body, and `OPTIONS` gets a 204 with an `Allow` header built from the route table.
 
 ## Other things I found
 
-These issues were already in sampo, independent of adding methods. The first three are fixed in `docker/sampo` now:
+These issues were already in sampo, independent of adding methods. The first four are fixed in `docker/sampo` now:
 
 1. **On Linux hosts, every response ended with a `** FAILURE **` banner (fixed).**
    - `container_check` decides sampo runs in a container whenever `/proc/1/cgroup` exists, and that file exists on every Linux machine. So sampo logged to `/proc/1/fd/1`, which fails unless it can write to PID 1's STDOUT. The `ERR` trap then printed the banner into the response.
    - [`common/0-linux-logging.patch`](common/0-linux-logging.patch) fixes this in one line by also checking that the file is writable. `lab.sh` applies it to every build, including `original`.
 2. **A request with any method other than `GET` to an unknown path got two responses**, a 404 and then a 501 (fixed by the shared patch).
 3. **A path that starts like an endpoint but matches no route, such as `/example/extra`, got an empty reply** (fixed by B's 404).
-4. **`send_response` strips leading whitespace from every line, and drops a last line that has no newline.** A file containing `    indented` followed by `last` without a newline is served as just `indented`. Changing the loop to `while IFS= read -r LINE || [[ -n $LINE ]]` would fix it.
+4. **`send_response` stripped leading whitespace from every line, and dropped a last line that had no newline** (fixed). A file containing `    indented` followed by `last` without a newline was served as just `indented`; the loop is now `while IFS= read -r LINE || [[ -n $LINE ]]`.
 5. **sampo.conf adds about 14 ms to every request**, because `$(basename ${0})` and `$(dirname …)` start new processes. Parameter expansion would make each request about a third faster.
 6. **On bash 3.2, which macOS ships as `/bin/bash`, every `run_external_script` route answers 500.** The error is `args[@]: unbound variable`: with `set -u`, bash before 4.4 treats an empty array as unset. So sampo already needed bash 4.4, and these changes don't raise that requirement.
 

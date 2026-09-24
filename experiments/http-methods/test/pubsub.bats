@@ -196,7 +196,12 @@ ended() {
 @test "a method a resource doesn't support gets 405 with an Allow header" {
   run http DELETE /topics
   assert_line --index 0 405
-  assert_equal "$(header Allow)" "GET"
+  if [[ "$OPTION" == "current" ]]; then
+    # docker/sampo also answers HEAD and OPTIONS, and says so
+    assert_equal "$(header Allow)" "GET,HEAD,OPTIONS"
+  else
+    assert_equal "$(header Allow)" "GET"
+  fi
 }
 
 @test "external scripts get the method in \$REQUEST_METHOD and the body on STDIN" {

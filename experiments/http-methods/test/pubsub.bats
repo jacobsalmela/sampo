@@ -3,7 +3,7 @@
 
 # Exercises GET, POST, PUT and DELETE through the pub/sub app, against a running sampo
 # built with one of the options.  lab.sh test starts the server and sets:
-#   OPTION   a-passthrough, b-method-routes or c-method-files
+#   OPTION   a-passthrough, b-method-routes, c-method-files, or current (docker/sampo, which has B)
 #   PORT     the port sampo is listening on
 
 setup() {
@@ -16,7 +16,7 @@ setup() {
 pick() {
   case "${OPTION:-}" in
     a-passthrough) echo "$1" ;;
-    b-method-routes) echo "$2" ;;
+    b-method-routes|current) echo "$2" ;;
     c-method-files) echo "$3" ;;
     *) echo "OPTION must be set" >&2; return 1 ;;
   esac

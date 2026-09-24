@@ -2,8 +2,8 @@
 #
 # lab.sh: build, serve, demo and test the three ways of adding POST, PUT and DELETE to sampo
 #
-# Each option is stock docker/sampo plus patches, so nothing outside this directory changes:
-#   common/0-linux-logging.patch   log to a file on Linux hosts (a fix sampo needs anyway; see README)
+# Each option is docker/sampo as it was before option B went into it (commit BASELINE), plus patches:
+#   common/0-linux-logging.patch   log to a file on Linux hosts (a fix sampo needed anyway; see README)
 #   common/1-request-body.patch    read the request body and hand it to handlers (all options)
 #   OPTION/sampo.sh.patch          how OPTION routes methods
 #   OPTION/sampo.conf.patch        how OPTION wires up the pub/sub app, if it uses sampo.conf
@@ -17,18 +17,22 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 REPO="$(cd "$HERE/../.." >/dev/null 2>&1 && pwd)"
 BATS="$REPO/test/test_helper/bats-core/bin/bats"
 OPTIONS=(a-passthrough b-method-routes c-method-files)
+# the last commit before sampo had option B; the patches apply to its docker/sampo
+BASELINE=294d3b75c54e1cdb4a722a882fc0caa6c0a47453
 
 #/ Usage: lab.sh COMMAND [ARGS]
 #/
 #/   OPTION is a, b or c (or a-passthrough, b-method-routes, c-method-files);
-#/   'original' is sampo as it is today, for comparison
+#/   'original' is sampo as it was before any of them, and 'current' is docker/sampo as it
+#/   is now (which has option B), with the pub/sub app wired up the way option B does it
 #/
 #/   build OPTION DIR       put a runnable sampo folder for OPTION in DIR
 #/   serve OPTION [PORT]    serve OPTION on PORT (default 1042) until Ctrl-C
 #/   demo OPTION [PORT]     serve OPTION and stream a topic to this terminal while publishing to it
 #/   test [OPTION...]       run test/pubsub.bats against each OPTION (default: all three)
 #/   regress [OPTION...]    run sampo's own test/sampo_integration.bats against each OPTION built
-#/                          with the stock sampo.conf (default: original and all three)
+#/                          with the stock sampo.conf (default: original and all three; the
+#/                          tests come from the same commit as the OPTION's sampo)
 #/   matrix [PORT]          show the status codes each OPTION answers a set of requests with
 #/
 #/   Servers run on this machine with socat, unless SAMPO_DOCKER_IMAGE names an image to run
@@ -43,15 +47,22 @@ die() {
   exit 1
 }
 
-# option_dir() turns a, b, c or original into the option's directory name
+# option_dir() turns a, b, c, original or current into the option's directory name
 option_dir() {
   case "$1" in
     a|a-passthrough) echo "a-passthrough" ;;
     b|b-method-routes) echo "b-method-routes" ;;
     c|c-method-files) echo "c-method-files" ;;
     original) echo "original" ;;
-    *) die "unknown option '$1': use a, b, c or original" ;;
+    current) echo "current" ;;
+    *) die "unknown option '$1': use a, b, c, original or current" ;;
   esac
+}
+
+# from_baseline() writes the BASELINE commit's version of file $1 (a path in the repo) to STDOUT
+from_baseline() {
+  git -C "$REPO" show "$BASELINE:$1" 2> /dev/null \
+    || die "can't read $1 from commit $BASELINE: lab.sh needs a git clone of sampo with that commit"
 }
 
 # lab_build() puts a runnable sampo folder for option $1 in $2
@@ -61,13 +72,19 @@ lab_build() {
   option="$(option_dir "$1")"
   src="$HERE/$option"
   mkdir -p "$out"
-  cp -R "$REPO/docker/sampo/." "$out/"
-  patch -s -p1 -d "$out" < "$HERE/common/0-linux-logging.patch"
-  if [[ "$option" == "original" ]]; then
-    return 0
+  if [[ "$option" == "current" ]]; then
+    cp -R "$REPO/docker/sampo/." "$out/"
+    src="$HERE/b-method-routes"
+  else
+    git -C "$REPO" archive "$BASELINE" docker/sampo | tar -x -f - -C "$out" --strip-components=2 \
+      || die "can't read docker/sampo from commit $BASELINE: lab.sh needs a git clone of sampo with that commit"
+    patch -s -p1 -d "$out" < "$HERE/common/0-linux-logging.patch"
+    if [[ "$option" == "original" ]]; then
+      return 0
+    fi
+    patch -s -p1 -d "$out" < "$HERE/common/1-request-body.patch"
+    patch -s -p1 -d "$out" < "$src/sampo.sh.patch"
   fi
-  patch -s -p1 -d "$out" < "$HERE/common/1-request-body.patch"
-  patch -s -p1 -d "$out" < "$src/sampo.sh.patch"
   if [[ "${3:-}" == "--no-app" ]]; then
     return 0
   fi
@@ -205,9 +222,10 @@ lab_test() {
   return "$status"
 }
 
-# lab_regress() runs sampo's own integration tests against each option, with the stock sampo.conf
+# lab_regress() runs sampo's own integration tests against each option, with the stock sampo.conf:
+# the options built from commit BASELINE get that commit's tests, and 'current' gets today's
 lab_regress() {
-  local option dir status=0 port=18044
+  local option dir tests status=0 port=18044
   [[ -x "$BATS" ]] || die "bats is missing: git submodule update --init"
   if [[ $# -eq 0 ]]; then
     set -- original "${OPTIONS[@]}"
@@ -216,9 +234,17 @@ lab_regress() {
     option="$(option_dir "$option")"
     dir="$(mktemp -d "${TMPDIR:-/tmp}/sampo-$option.XXXXXX")"
     stop_on_exit "$port" "$dir"
+    tests="$REPO/test/sampo_integration.bats"
+    if [[ "$option" != "current" ]]; then
+      # put the old tests next to the helpers they load
+      mkdir "$dir/lab-tests"
+      from_baseline test/sampo_integration.bats > "$dir/lab-tests/sampo_integration.bats"
+      ln -s "$REPO/test/test_helper" "$dir/lab-tests/test_helper"
+      tests="$dir/lab-tests/sampo_integration.bats"
+    fi
     echo "== $option, with the stock sampo.conf"
     lab_start "$option" "$port" "$dir" --no-app
-    PORT="$port" "$BATS" "$REPO/test/sampo_integration.bats" || status=1
+    PORT="$port" "$BATS" "$tests" || status=1
     lab_stop "$port" "$dir"
     rm -rf "$dir"
   done

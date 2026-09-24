@@ -113,9 +113,29 @@ body: rusty-fork
 
 A script gets the request body on STDIN, with `REQUEST_METHOD`, `CONTENT_TYPE` and `CONTENT_LENGTH` in its environment, as a CGI script would. A function defined in `sampo.conf` finds the body in `$REQUEST_BODY`.
 
-A request whose URI matches only rules for other methods gets `405 Method Not Allowed`, with an `Allow` header that lists those methods. A request that matches no rule gets `404 Not Found`. Bodies larger than `SAMPO_MAX_BODY` bytes (1 MiB unless you set it) get `413 Payload Too Large`.
+`GET` rules also answer `HEAD`, which gets the same status and headers without the body. sampo answers `OPTIONS` itself, with `204 No Content` and an `Allow` header listing the methods the URI has rules for. A request whose URI matches only rules for other methods gets `405 Method Not Allowed`, with the same `Allow` header. A request that matches no rule gets `404 Not Found`. Bodies larger than `SAMPO_MAX_BODY` bytes (1 MiB unless you set it) get `413 Payload Too Large`.
 
 [experiments/http-methods](experiments/http-methods) compares this design with two others. It also has a pub/sub app that uses all four methods and streams messages to your terminal.
+
+## Status Codes And Streaming
+
+`run_external_script` waits for a script to finish, then sends its output with `200 OK`, or with `500 Internal Server Error` if the script failed. To choose the status and headers yourself, and to send output as it's written, use `run_cgi_script`. The script then starts its output the way a CGI script does: with a `Status:` line if the status isn't 200, any other headers, and then a blank line:
+
+```bash
+match_uri '^/countdown/(.*)$' run_cgi_script "${SAMPO_BASE}"/scripts/example_countdown.sh
+```
+
+```bash
+echo "Content-Type: text/plain"
+echo
+for ((i = seconds; i > 0; i--)); do
+  echo "$i"
+  sleep 1
+done
+echo "liftoff"
+```
+
+`curl -N http://localhost:1042/countdown/5` shows each number as the script prints it, and `/countdown/eleven` gets the `400 Bad Request` that the script asks for. A script's STDERR isn't sent to the client.
 
 # Details
 

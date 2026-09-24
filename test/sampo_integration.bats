@@ -31,6 +31,12 @@ test_valid_json(){
     assert_output --partial '"bash_version":'
 }
 
+@test "test that the 'jsonsimple' endpoint keeps the script's indentation" {
+  run test_curl http://localhost:${PORT:-1042}/jsonsimple
+    assert_success
+    assert_line --regexp '^    "bash_version":"'
+}
+
 @test "test that the 'jsonsimple' endpoint returns status code 200" {
   run test_curl_with_status_code http://localhost:${PORT:-1042}/jsonsimple
     assert_success
@@ -117,7 +123,58 @@ body: héllo ✓'
   run test_curl -i -X DELETE http://localhost:${PORT:-1042}/example
   assert_success
   assert_line --index 0 'HTTP/1.0 405 Method_Not_Allowed'
-  assert_line 'Allow: GET,POST'
+  assert_line 'Allow: GET,HEAD,POST,OPTIONS'
+}
+
+@test "test that HEAD gets the status and headers of a GET, and no body" {
+  run test_curl -i -X HEAD http://localhost:${PORT:-1042}/example
+  assert_success
+  assert_line --index 0 'HTTP/1.0 200 OK'
+  refute_output --partial 'This is an example of an external script.'
+}
+
+@test "test that OPTIONS returns status code 204 and lists the methods an endpoint has" {
+  run test_curl -i -X OPTIONS http://localhost:${PORT:-1042}/example
+  assert_success
+  assert_line --index 0 'HTTP/1.0 204 No_Content'
+  assert_line 'Allow: GET,HEAD,POST,OPTIONS'
+}
+
+@test "test that OPTIONS for an endpoint that doesn't exist returns status code 404" {
+  run test_curl_with_status_code -X OPTIONS http://localhost:${PORT:-1042}/nope
+    assert_success
+    assert_output '404'
+}
+
+@test "test that the 'countdown' endpoint sends all of its script's output" {
+  run test_curl http://localhost:${PORT:-1042}/countdown/1
+  assert_success
+  assert_output '1
+liftoff'
+}
+
+@test "test that the 'countdown' endpoint streams its script's output as the script writes it" {
+  # the countdown takes 3 seconds, but its first line arrives long before that
+  run test_curl -N --max-time 1.5 http://localhost:${PORT:-1042}/countdown/3
+  assert_success
+  assert_line --index 0 '3'
+  refute_output --partial 'liftoff'
+}
+
+@test "test that a script run with run_cgi_script chooses its status code and headers" {
+  run test_curl -i http://localhost:${PORT:-1042}/countdown/eleven
+  assert_success
+  assert_line --index 0 'HTTP/1.0 400 Bad_Request'
+  assert_line 'Content-Type: text/plain'
+  assert_line 'Count down from 0 to 10 seconds, for example with /countdown/5'
+}
+
+@test "test that HEAD gets the headers of a streaming script without waiting for the rest" {
+  run test_curl -i -X HEAD --max-time 5 http://localhost:${PORT:-1042}/countdown/9
+  assert_success
+  assert_line --index 0 'HTTP/1.0 200 OK'
+  assert_line 'Content-Type: text/plain'
+  refute_line '9'
 }
 
 @test "test that a method sampo doesn't implement returns status code 501" {
@@ -155,6 +212,7 @@ body: héllo ✓'
   run test_curl http://localhost:${PORT:-1042}/
   assert_success
   assert_output 'GET /:list_endpoints
+GET /countdown/:run_cgi_script
 GET /dir/:serve_dir_with_ls
 GET /example:run_external_script
 POST /example:run_external_script

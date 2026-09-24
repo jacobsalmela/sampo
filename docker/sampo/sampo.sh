@@ -57,8 +57,8 @@ declare -a RESPONSE_HEADERS=(
   "Server: $APP/$VERSION"
 )
 
-# Reponse codes from https://tools.ietf.org/html/rfc7231
-# Some codes are added but commented out for use later
+# Reponse codes from https://tools.ietf.org/html/rfc7231 and the RFCs that followed it
+# Scripts run with run_cgi_script() can answer with any of them
 declare -a RESPONSE_CODE=(
   # Information
   [100]="Continue"
@@ -69,43 +69,46 @@ declare -a RESPONSE_CODE=(
   [203]="Non-Authoritative_Information"
   [204]="No_Content"
   [205]="Reset_Connection"
+  [206]="Partial_Content"
   # Redirection
   [300]="Multiple_Choices"
   [301]="Moved_Permanently"
   [302]="Found"
   [303]="See_Other"
-  # [304]="Not Modified"
+  [304]="Not_Modified"
   [305]="Use_Proxy"
   [307]="Temporary_Redirect"
+  [308]="Permanent_Redirect"
   # Client error
   [400]="Bad_Request"
-  # [401]="Unauthorized"
+  [401]="Unauthorized"
   [402]="Payment_Required"
   [403]="Forbidden"
   [404]="Not_Found"
   [405]="Method_Not_Allowed"
   [406]="Not_Acceptable"
+  [407]="Proxy_Authentication_Required"
   [408]="Request_Timeout"
   [409]="Conflict"
   [410]="Gone"
   [411]="Length_Required"
-  # [412]="Precondition_Failed"
+  [412]="Precondition_Failed"
   [413]="Payload_Too_Large"
   [414]="URI_Too_Long"
   [415]="Unsupported_Media_Type"
-  # [416]="Range_Not_Satisfiable"
+  [416]="Range_Not_Satisfiable"
   [417]="Expectation_Failed"
-  # [418]="I'm_a_teapot"
-  # [421]="Misdirected_Request"
-  # [422]="Unprocessable_Entity"
-  # [423]="Locked"
-  # [424]="Fail"
-  # [425]="Too_Early"
+  [418]="I'm_a_teapot"
+  [421]="Misdirected_Request"
+  [422]="Unprocessable_Entity"
+  [423]="Locked"
+  [424]="Failed_Dependency"
+  [425]="Too_Early"
   [426]="Upgrade_Required"
-  # [428]="Precondition_Required"
-  # [429]="Too_Many_Requests"
-  # [431]="Request_Header_Fields_Too_Large"
-  # [451]="Unavailable_For_Legal_Reasons"
+  [428]="Precondition_Required"
+  [429]="Too_Many_Requests"
+  [431]="Request_Header_Fields_Too_Large"
+  [451]="Unavailable_For_Legal_Reasons"
   # Server_error
   [500]="Internal_Server_Error"
   [501]="Not_Implemented"
@@ -113,11 +116,11 @@ declare -a RESPONSE_CODE=(
   [503]="Service_Unavailable"
   [504]="Gateway_Timeout"
   [505]="HTTP_Version_Not_Supported"
-  # [506]="Variant_Also_Negotiates"
-  # [507]="Insufficient_Storage"
-  # [508]="Loop_Detected"
-  # [510]="Not_Extended"
-  # [511]="Network_Authentication_Required"
+  [506]="Variant_Also_Negotiates"
+  [507]="Insufficient_Storage"
+  [508]="Loop_Detected"
+  [510]="Not_Extended"
+  [511]="Network_Authentication_Required"
 )
 
 # The methods of routes that matched the request's path but not its method (see match_uri)
@@ -218,14 +221,23 @@ send_response() {
   # send a blank line
   respond
 
-  #
-  while read -r LINE; do
-    respond "$LINE"
-  done
-  
+  # send the body a line at a time, as it arrives, keeping each line as it is,
+  # including the last one when it doesn't end with a newline
+  # a HEAD request gets everything a GET would, except the body
+  if [[ "${REQUEST_METHOD:-}" != "HEAD" ]]; then
+    while IFS= read -r LINE || [[ -n "$LINE" ]]; do
+      respond "$LINE"
+    done
+  fi
+
   # Log the request now that the code has been set
   STATUS_CODE=$code
   loggy ""
+
+  # nothing may follow the headers of a HEAD response, so stop here, even if the handler would go on
+  if [[ "${REQUEST_METHOD:-}" == "HEAD" ]]; then
+    exit 0
+  fi
 }
 
 
@@ -291,8 +303,10 @@ serve_dir_with_ls()
 # match_uri() matches a URI against a regex and calls a function if it matches
 # usage: match_uri [METHOD] REGEX command [args]
 # METHOD is GET, POST, PUT or DELETE; a route without one is a GET route, as before
+# GET routes also answer HEAD requests (send_response() leaves out the body)
 match_uri() {
   local method="GET"
+  local request_method="$REQUEST_METHOD"
   if [[ "$1" =~ ^(GET|POST|PUT|DELETE)$ ]]; then
     method="$1"
     shift
@@ -300,6 +314,9 @@ match_uri() {
   local regex="$1"
   # shift to the next parameter
   shift
+  if [[ "$request_method" == "HEAD" ]]; then
+    request_method="GET"
+  fi
 
   if [[ ${SAMPO_DEBUG:=false} == true ]]; then
     debuggy "Matching '$REQUEST_URI' against '$regex' for commands: $* <rematches...> <non-matches...>"
@@ -307,8 +324,9 @@ match_uri() {
 
   # if the REQUEST_URI matches the regex passed in as the first argument,
   if [[ $REQUEST_URI =~ $regex ]]; then
-    # the path matches, but this route is for another method: remember it for a 405's Allow header
-    if [[ "$REQUEST_METHOD" != "$method" ]]; then
+    # the path matches, but this route is for another method: remember it for the Allow header
+    # of a 405, or of the answer to OPTIONS
+    if [[ "$request_method" != "$method" ]]; then
       ALLOWED_METHODS+=("$method")
       return 0
     fi
@@ -325,6 +343,24 @@ match_uri() {
       "$@" "${BASH_REMATCH[@]}"
     fi
   fi
+}
+
+
+# allowed_methods() prints ALLOWED_METHODS for an Allow header: each method once, with HEAD
+# after GET, and OPTIONS, which sampo answers for any route
+allowed_methods() {
+  local method allowed=""
+  for method in "${ALLOWED_METHODS[@]}"; do
+    # skip methods that are already listed
+    if [[ ",$allowed," == *",$method,"* ]]; then
+      continue
+    fi
+    allowed+="${allowed:+,}$method"
+    if [[ "$method" == "GET" ]]; then
+      allowed+=",HEAD"
+    fi
+  done
+  echo "${allowed:+$allowed,}OPTIONS"
 }
 
 
@@ -407,9 +443,9 @@ endpoint_exists() {
 
 }
 
-# run_external_script() runs an arbitrary shell script located somewhere else
-# this is arguably the best feature of sampo, as it allows unlimited extensibility
-run_external_script() {
+# script_args() turns the arguments of run_external_script() and run_cgi_script() into
+# script_to_run, the script, and args, the arguments to run it with
+script_args() {
   script_to_run="$1"
   endpoint="$2"
   shift 2
@@ -436,18 +472,76 @@ run_external_script() {
   if [[ "${SAMPO_DEBUG:=false}" == "true" ]]; then
     debuggy "[$(basename "${BASH_SOURCE[0]}"):${LINENO}:${FUNCNAME[*]:0:${#FUNCNAME[@]}-1}()] running external script: $script_to_run ${args[*]}"
   fi
+}
+
+# run_external_script() runs an arbitrary shell script located somewhere else
+# this is arguably the best feature of sampo, as it allows unlimited extensibility
+run_external_script() {
+  script_args "$@"
   retval=200
   # the request body, if any, is the script's STDIN
   result="$("${script_to_run}" "${args[@]}" 2>&1 < <(printf '%s' "${REQUEST_BODY:-}"))" || retval=500
   send_response $retval <<< "$result"
 }
 
+# run_cgi_script() runs a script like run_external_script() does, except that the script chooses
+# the status and headers, and its output reaches the client as the script writes it, byte for byte.
+# Like a CGI script, it starts its output with headers, such as "Status: 201" (the status is 200
+# without one) or "Content-Type: application/json", and then a blank line; the rest is the body.
+# The script's STDERR is not sent to the client.
+run_cgi_script() {
+  local fd line name value status=200 script_pid
+  local -a headers=()
+  # a header is a name, a colon and a value; matching the whole line with a regex takes time in
+  # proportion to its length, where some ${line%...} expansions take its square
+  local header_regex='^([A-Za-z0-9-]+):[[:blank:]]*(.*)$'
+  script_args "$@"
+  # the request body, if any, is the script's STDIN
+  exec {fd}< <(exec "${script_to_run}" "${args[@]}" < <(printf '%s' "${REQUEST_BODY:-}"))
+  script_pid=$!
+  # stop the script if sampo finishes first: after the headers of a HEAD response, say,
+  # or when the client goes away
+  # shellcheck disable=SC2064 # the PID is known now
+  trap "kill $script_pid 2> /dev/null || true" EXIT
+
+  # read the headers, up to the blank line
+  while IFS= read -r -u "$fd" line; do
+    if [[ "$line" == *$'\r' ]]; then
+      line="${line:0:${#line}-1}"
+    fi
+    if [[ -z "$line" ]]; then
+      # send the status and headers, then the rest of the output as it comes
+      RESPONSE_HEADERS+=( "${headers[@]}" )
+      send_response "$status" < /dev/null
+      cat <&"$fd" || true
+      return 0
+    fi
+    if [[ ! "$line" =~ $header_regex ]]; then
+      send_response 500 <<< "${script_to_run##*/} sent '${line:0:100}' where a header should be"
+      return 0
+    fi
+    name="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    if [[ "${name,,}" == "status" ]]; then
+      # check the code before using it as an index: bash evaluates array indexes as math
+      if [[ ! "$value" =~ ^([1-5][0-9][0-9])([[:blank:]]|$) ]] || [[ -z "${RESPONSE_CODE[${BASH_REMATCH[1]}]:-}" ]]; then
+        send_response 500 <<< "${script_to_run##*/} sent an unknown status: ${value:0:100}"
+        return 0
+      fi
+      status="${BASH_REMATCH[1]}"
+    else
+      headers+=( "$name: $value" )
+    fi
+  done
+  send_response 500 <<< "${script_to_run##*/} ended before the blank line that ends its headers"
+}
+
 
 # listen_for_requests() listens for requests from the client
 # it reads in the request and parses it into three variables that make up the request
 # REQUEST_METHOD, REQUEST_URI, and REQUEST_HTTP_VERSION
+# it checks the request headers, which can be used in log files or elsewhere, and reads the body
 # then, it calls endpoint_exists() to check if the endpoint exists in the config file
-# it checks the request headers, which can be used in log files or elsewhere
 # it checks if the script is running in a container
 # then it sources sampo.conf to get the user-defined endpoints and functions
 # there is a bit of logic to determine if this entire script is being sourced or not
@@ -470,8 +564,6 @@ listen_for_requests() {
   if [[ -z "$REQUEST_METHOD" ]] || [[ -z "$REQUEST_URI" ]] || [[ -z "$REQUEST_HTTP_VERSION" ]]; then
     fail_with 400
   fi
-
-  endpoint_exists
 
   # Declare an array for the request headers.  We can use this in a
   # similiar fashion to the RESPONSE_HEADERS by looping over it for whatever we need
@@ -520,7 +612,8 @@ listen_for_requests() {
     read_body "$REQUEST_CONTENT_LENGTH"
   fi
 
-  # endpoint_exists() has already answered with a 404, so there is nothing left to do
+  # now that the whole request has been read, answer with a 404 if the endpoint doesn't exist
+  endpoint_exists
   if [[ -n "${STATUS_CODE:-}" ]]; then
     exit 0
   fi
@@ -529,8 +622,8 @@ listen_for_requests() {
   export REQUEST_METHOD REQUEST_URI
   export CONTENT_LENGTH="${REQUEST_CONTENT_LENGTH:-0}" CONTENT_TYPE="${REQUEST_CONTENT_TYPE:-}"
 
-  # match_uri() decides which method each route accepts
-  if [[ "$REQUEST_METHOD" =~ ^(GET|POST|PUT|DELETE)$ ]]; then
+  # match_uri() decides which method each route accepts; HEAD and OPTIONS are answered for every route
+  if [[ "$REQUEST_METHOD" =~ ^(GET|HEAD|POST|PUT|DELETE|OPTIONS)$ ]]; then
     :  
   else
     send_response 501 < <(echo "$REQUEST_METHOD is invalid or not yet implemented. $FUNDING")
@@ -560,10 +653,15 @@ if [[ "$(basename "${0}")" == "sampo.sh" ]]; then
   #shellcheck source=sampo.conf
   source "${CONFIG}"
 
-  # no route answered: the path only has routes for other methods (405), or no route at all (404)
+  # no route answered: the path only has routes for other methods, or no route at all (404)
+  # OPTIONS lists the methods the path does have, and any other method gets a 405 that lists them
   if [[ -z "${STATUS_CODE:-}" ]]; then
     if [[ ${#ALLOWED_METHODS[@]} -gt 0 ]]; then
-      append_header "Allow" "$(IFS=,; echo "${ALLOWED_METHODS[*]}")"
+      append_header "Allow" "$(allowed_methods)"
+      if [[ "$REQUEST_METHOD" == "OPTIONS" ]]; then
+        send_response 204 < /dev/null
+        exit 0
+      fi
       fail_with 405
     fi
     fail_with 404

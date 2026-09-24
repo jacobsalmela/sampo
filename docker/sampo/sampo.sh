@@ -120,6 +120,9 @@ declare -a RESPONSE_CODE=(
   # [511]="Network_Authentication_Required"
 )
 
+# The methods of routes that matched the request's path but not its method (see match_uri)
+declare -a ALLOWED_METHODS=()
+
 # Check the control groups of the init process, which vary depending on the OS vs. container
 readonly CONTAINER_CHECK="/proc/1/cgroup"
 readonly CONFIG="$DIR/$APP.conf"
@@ -226,6 +229,13 @@ send_response() {
 }
 
 
+# read_body() reads exactly $1 bytes of the request body into REQUEST_BODY
+# LC_ALL=C makes read -N count bytes (like Content-Length does) instead of characters
+read_body() {
+  local LC_ALL=C
+  IFS= read -r -N "$1" REQUEST_BODY || true
+}
+
 # fail_with() pseudo-fails the script with a given response code
 fail_with() {
   local code="$1"
@@ -279,7 +289,14 @@ serve_dir_with_ls()
 
 
 # match_uri() matches a URI against a regex and calls a function if it matches
+# usage: match_uri [METHOD] REGEX command [args]
+# METHOD is GET, POST, PUT or DELETE; a route without one is a GET route, as before
 match_uri() {
+  local method="GET"
+  if [[ "$1" =~ ^(GET|POST|PUT|DELETE)$ ]]; then
+    method="$1"
+    shift
+  fi
   local regex="$1"
   # shift to the next parameter
   shift
@@ -290,6 +307,11 @@ match_uri() {
 
   # if the REQUEST_URI matches the regex passed in as the first argument,
   if [[ $REQUEST_URI =~ $regex ]]; then
+    # the path matches, but this route is for another method: remember it for a 405's Allow header
+    if [[ "$REQUEST_METHOD" != "$method" ]]; then
+      ALLOWED_METHODS+=("$method")
+      return 0
+    fi
     # the matched part of the REQUEST_URI above is stored in the BASH_REMATCH array
     # the unmatched part may comprise path and query parameters: pass them on, too
     local unmatched="${REQUEST_URI#${BASH_REMATCH[0]}}"
@@ -328,7 +350,7 @@ detect_endpoints() {
   ENDPOINTS_FUNCTIONS=()
   ENDPOINTS=()
   # search for all the endpoints defined and the functions they call in the config file
-  while read -r endpoint
+  while read -r method endpoint
   do
     # get just the endpoint name
     # % * here means remove the string from the end of the variable's contents
@@ -342,14 +364,15 @@ detect_endpoints() {
 
     # Append it to the ENDPOINTS_FUNCTIONS array,
     # So we have a hacky "dictionary" of an endpoint and it's associated function that it calls
-    ENDPOINTS_FUNCTIONS+=("$e:$f")
+    ENDPOINTS_FUNCTIONS+=("$method $e:$f")
     # Create an array of just
     ENDPOINTS+=("$e")
   # seach for match_uri lines in the config file
   # and put the endpoint name and the function it calls into an array
   # due to whitespace in the config, check the first field for match_uri
   # remove all non-alphanumeric characters and newlines since they code definitions span multiple lines
-  done  < <(awk '{if ($1 ~ /^match_uri/) print $2, $3}' "$CONFIG" | tr -dc '[:alnum:][:space:]/_\n\r' | sort)
+  # a route without a method is a GET route
+  done  < <(awk '{if ($1 ~ /^match_uri/) { if ($2 !~ /^(GET|POST|PUT|DELETE)$/) $0 = $1 " GET " $2 " " $3; print $2, $3, $4 }}' "$CONFIG" | tr -dc '[:alnum:][:space:]/_\n\r' | sort -k2,2 -k1,1)
   # done < <(awk '/^match_uri/ {print $2, $3}' "$CONFIG" | tr -d '[:alnum:][:space:]/_\n\r' | sort)
 }
 
@@ -414,7 +437,8 @@ run_external_script() {
     debuggy "[$(basename "${BASH_SOURCE[0]}"):${LINENO}:${FUNCNAME[*]:0:${#FUNCNAME[@]}-1}()] running external script: $script_to_run ${args[*]}"
   fi
   retval=200
-  result="$("${script_to_run}" "${args[@]}" 2>&1)" || retval=500
+  # the request body, if any, is the script's STDIN
+  result="$("${script_to_run}" "${args[@]}" 2>&1 < <(printf '%s' "${REQUEST_BODY:-}"))" || retval=500
   send_response $retval <<< "$result"
 }
 
@@ -461,12 +485,12 @@ listen_for_requests() {
     header_value="${LINE#*: }"
 
     case "$header_key" in
-      # Content-Length)
-      #   REQUEST_CONTENT_LENGTH="$header_value"
-      #   ;;
-      # Content-Type)
-      #   REQUEST_CONTENT_TYPE="$header_value"
-      #   ;;
+      [Cc]ontent-[Ll]ength)
+        REQUEST_CONTENT_LENGTH="$header_value"
+        ;;
+      [Cc]ontent-[Tt]ype)
+        REQUEST_CONTENT_TYPE="$header_value"
+        ;;
       Host)
         REQUEST_HOST="$header_value"
         ;;
@@ -484,7 +508,29 @@ listen_for_requests() {
     REQUEST_HEADERS+=("$LINE")
   done
 
-  if [[ "$REQUEST_METHOD" == "GET" ]]; then
+  # Read the request body (sent with POST and PUT) into REQUEST_BODY
+  REQUEST_BODY=""
+  if [[ -n "${REQUEST_CONTENT_LENGTH:-}" ]]; then
+    # validate before doing any math: bash evaluates the contents of variables inside (( ))
+    if [[ ! "$REQUEST_CONTENT_LENGTH" =~ ^[0-9]+$ ]]; then
+      fail_with 400
+    elif [[ ${#REQUEST_CONTENT_LENGTH} -gt 9 ]] || (( 10#$REQUEST_CONTENT_LENGTH > ${SAMPO_MAX_BODY:-1048576} )); then
+      fail_with 413
+    fi
+    read_body "$REQUEST_CONTENT_LENGTH"
+  fi
+
+  # endpoint_exists() has already answered with a 404, so there is nothing left to do
+  if [[ -n "${STATUS_CODE:-}" ]]; then
+    exit 0
+  fi
+
+  # Like CGI, hand the method and body details to external scripts through the environment
+  export REQUEST_METHOD REQUEST_URI
+  export CONTENT_LENGTH="${REQUEST_CONTENT_LENGTH:-0}" CONTENT_TYPE="${REQUEST_CONTENT_TYPE:-}"
+
+  # match_uri() decides which method each route accepts
+  if [[ "$REQUEST_METHOD" =~ ^(GET|POST|PUT|DELETE)$ ]]; then
     :  
   else
     send_response 501 < <(echo "$REQUEST_METHOD is invalid or not yet implemented. $FUNDING")
@@ -513,6 +559,15 @@ if [[ "$(basename "${0}")" == "sampo.sh" ]]; then
   # when a client queries sampo, the request is checked against what is defined there
   #shellcheck source=sampo.conf
   source "${CONFIG}"
+
+  # no route answered: the path only has routes for other methods (405), or no route at all (404)
+  if [[ -z "${STATUS_CODE:-}" ]]; then
+    if [[ ${#ALLOWED_METHODS[@]} -gt 0 ]]; then
+      append_header "Allow" "$(IFS=,; echo "${ALLOWED_METHODS[*]}")"
+      fail_with 405
+    fi
+    fail_with 404
+  fi
 else
   # this script is being sourced so do not run the functions
   # this helps with unit tests and/or other scripts needing to utilize the functions defined here

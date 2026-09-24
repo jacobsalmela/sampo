@@ -94,6 +94,29 @@ You can also create your own image with the scripts bundled in.  Clone this repo
 - `sampo.conf` is configured to user-defined endpoint that run user-defined shell scripts
 - `scripts/` contains all of the user-defined scripts
 
+# HTTP Methods
+
+A rule in `sampo.conf` answers `GET` unless it names another method. To take a `POST`, `PUT` or `DELETE`, put the method before the regex:
+
+```bash
+match_uri POST '^/example$' run_external_script "${SAMPO_BASE}"/scripts/example_post.sh
+```
+
+```
+joukahainen:~$ curl -X POST -d 'rusty-fork' http://localhost:1042/example
+This is an example of an external script that receives a request body.
+method: POST
+content type: application/x-www-form-urlencoded
+content length: 10
+body: rusty-fork
+```
+
+A script gets the request body on STDIN, with `REQUEST_METHOD`, `CONTENT_TYPE` and `CONTENT_LENGTH` in its environment, as a CGI script would. A function defined in `sampo.conf` finds the body in `$REQUEST_BODY`.
+
+A request whose URI matches only rules for other methods gets `405 Method Not Allowed`, with an `Allow` header that lists those methods. A request that matches no rule gets `404 Not Found`. Bodies larger than `SAMPO_MAX_BODY` bytes (1 MiB unless you set it) get `413 Payload Too Large`.
+
+[experiments/http-methods](experiments/http-methods) compares this design with two others. It also has a pub/sub app that uses all four methods and streams messages to your terminal.
+
 # Details
 
 Details can be found on [this blog post](https://jacobsalmela.com/2020/09/15/introducing-sampo-a-bash-api-server-that-runs-your-shell-scripts/).
